@@ -241,12 +241,12 @@ Search for any prior Astronomer conversations with this company. This is the hig
 
 1. Run the Gong transcript script:
    ```bash
-   python3 -u /Users/joeykenney/claude-work/gong_account_transcripts.py "COMPANY_NAME" --stdout
+   python3 -u ~/claude-work/gong_account_transcripts.py "COMPANY_NAME" --stdout
    ```
 
 2. If the exact name doesn't match, try variations (e.g., "Runway" vs "Runway AI" vs "RunwayML"). You can list available accounts:
    ```bash
-   python3 /Users/joeykenney/claude-work/gong_account_transcripts.py --list-accounts
+   python3 ~/claude-work/gong_account_transcripts.py --list-accounts
    ```
 
 3. If calls are found, extract:
