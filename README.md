@@ -88,6 +88,17 @@ cp prompts/01_fit_scoring.md ~/claude-work/research-assistant/prompts/
 cp prompts/02_account_research.md ~/claude-work/research-assistant/prompts/
 ```
 
+Create your account list at `~/claude-work/research-assistant/inputs/accounts.csv`. The file needs two columns — `company_name` and `domain`:
+
+```csv
+company_name,domain
+Acme Corp,acme.com
+Beta Inc,betainc.io
+Gamma LLC,gamma.io
+```
+
+Export this from Apollo, Salesforce, or wherever your account list lives. The `domain` column is used to pull website visit data from Leadfeeder and to match the correct Apollo record when writing reports back — so make sure it's the company's primary website domain (not a redirect or CDN domain).
+
 ### 3. Set up the Gong transcript script
 
 The skills call a local Python script to fetch Gong call transcripts. Get it from the [claude-work repo](https://github.com/joeykenney-cpu/claude-work/tree/main/Gong-transcript-search-skill) and place it at `~/claude-work/gong_account_transcripts.py`.
