@@ -88,7 +88,11 @@ cp prompts/01_fit_scoring.md ~/claude-work/research-assistant/prompts/
 cp prompts/02_account_research.md ~/claude-work/research-assistant/prompts/
 ```
 
-Create your account list at `~/claude-work/research-assistant/inputs/accounts.csv`. The file needs two columns — `company_name` and `domain`:
+Create your account list at `~/claude-work/research-assistant/inputs/accounts.csv`. The file needs two columns — `company_name` and `domain`.
+
+**Getting the list**: Export your accounts from Apollo, Salesforce, or any CRM. If you're working from an Excel or Google Sheets file, save/download it as a CSV before placing it in the inputs folder.
+
+The file should look like this:
 
 ```csv
 company_name,domain
@@ -97,7 +101,7 @@ Beta Inc,betainc.io
 Gamma LLC,gamma.io
 ```
 
-Export this from Apollo, Salesforce, or wherever your account list lives. The `domain` column is used to pull website visit data from Leadfeeder and to match the correct Apollo record when writing reports back — so make sure it's the company's primary website domain (not a redirect or CDN domain).
+The `domain` column is used to pull website visit data from Leadfeeder and to match the correct Apollo record when writing reports back — so make sure it's the company's primary website domain (not a redirect or CDN domain).
 
 ### 3. Set up the Gong transcript script
 
