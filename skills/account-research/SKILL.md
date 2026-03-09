@@ -87,11 +87,32 @@ Run these searches (parallel where possible):
    )
    ```
 
-3. **Hiring Signals**:
+3. **Hiring Signals — careers page first (primary source of truth)**:
+
+   a) Try crawling the company's own careers page in this order, stopping at the first that returns content:
+   ```
+   mcp__exa__crawling_exa(url="https://{DOMAIN}/careers", maxCharacters=5000)
+   mcp__exa__crawling_exa(url="https://{DOMAIN}/jobs", maxCharacters=5000)
+   mcp__exa__crawling_exa(url="https://{DOMAIN}/about/careers", maxCharacters=5000)
+   mcp__exa__crawling_exa(url="https://{DOMAIN}/company/careers", maxCharacters=5000)
+   ```
+
+   b) If the careers page lists individual role URLs, crawl the 2-3 most relevant data/platform/engineering postings (maxCharacters=5000 each) to extract tech stack requirements. Skip if no relevant roles listed.
+
+   c) If all careers page attempts fail (404 or empty), fall back to a job board search:
+   ```
+   mcp__exa__web_search_advanced_exa(
+     query='"{COMPANY_NAME}" site:greenhouse.io OR site:lever.co OR site:ashbyhq.com OR site:jobs.ashbyhq.com',
+     numResults=5
+   )
+   ```
+   Then crawl the top 2 relevant results.
+
+   d) If job board search also returns nothing, run a plain web search (no `category` param):
    ```
    mcp__exa__web_search_advanced_exa(
      query="{COMPANY_NAME} hiring data engineer platform engineer",
-     category="company", startPublishedDate=[6 months ago], numResults=5
+     startPublishedDate=[6 months ago], numResults=5
    )
    ```
 
@@ -127,11 +148,7 @@ Run these searches (parallel where possible):
    )
    ```
 
-9. **Job Description Details** — crawl the top 1-2 relevant data/platform engineering job postings found in search 3:
-   ```
-   mcp__exa__crawling_exa(url="[JOB_POSTING_URL]", maxCharacters=5000)
-   ```
-   Skip if no relevant postings found.
+9. **Job Description Details** — already handled in search 3b above. No additional step needed.
 
 #### Agent 2: Internal Signals (Leadfeeder + Common Room + Gong)
 
