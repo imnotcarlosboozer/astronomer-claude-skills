@@ -102,9 +102,9 @@ Use Claude's built-in **WebSearch** and **WebFetch** tools for all queries. If `
 
    Extract from each result: named orchestration tool (Airflow = existing user; Dagster/Prefect = competitor; Luigi/Argo/Kubeflow/custom = opportunity); data volume/scale (copy exact phrases); pipeline frequency (batch/streaming/real-time); migration stories ("moved from X to Y"); architecture signals (data mesh, lakehouse, microservices). Tag every finding with source URL and date.
 
-3a. **Hiring Signals — job posting discovery** — two parallel searches, both in Batch A:
+3a. **Hiring Signals — job posting discovery** — three parallel searches, all in Batch A:
 
-   **Title search** — broad role coverage:
+   **Title search** — broad role coverage on major job boards:
    ```
    WebSearch('"{COMPANY_NAME}" site:greenhouse.io OR site:lever.co OR site:ashbyhq.com ("data engineer" OR "data platform" OR "platform engineer" OR "ML engineer" OR "MLOps" OR "analytics engineer" OR "data architect" OR "data infrastructure" OR "data operations" OR "data reliability")')
    ```
@@ -115,7 +115,12 @@ Use Claude's built-in **WebSearch** and **WebFetch** tools for all queries. If `
    ```
    This catches Airflow requirements embedded in ML Engineer, DevOps, Backend, or Staff Engineer roles that a title-only search would miss.
 
-   If both return fewer than 2 combined results, also include in Batch A:
+   **LinkedIn search** — catches postings not on Greenhouse/Lever/Ashby (many mid-market and non-US companies post exclusively here):
+   ```
+   WebSearch('site:linkedin.com/jobs "{COMPANY_NAME}" ("data engineer" OR "data platform" OR "MLOps" OR "Apache Airflow" OR "data infrastructure")')
+   ```
+
+   If all three return fewer than 2 combined results, also include in Batch A:
    ```
    WebSearch('site:{DOMAIN} ("data engineer" OR "data platform" OR "platform engineer" OR "ML engineer" OR "MLOps" OR "analytics engineer" OR "data architect" OR "data infrastructure")')
    ```
@@ -164,6 +169,19 @@ Use Claude's built-in **WebSearch** and **WebFetch** tools for all queries. If `
    WebFetch(that URL, maxCharacters=3000)
    ```
    Extract: every tool listed, especially Airflow, Spark, dbt, Snowflake, Databricks, Kafka, Flink. If no StackShare profile found, record "No StackShare profile found."
+
+10. **GitHub Org Search**:
+   ```
+   WebSearch('site:github.com "{COMPANY_NAME}" (airflow OR dbt OR dagster OR prefect OR "data pipeline")')
+   ```
+   If a company GitHub org URL is returned (e.g., `github.com/company-name`), fetch it (`maxCharacters=3000`). Extract: public repos confirming Airflow DAGs, dbt projects, data engineering tooling, or infrastructure-as-code. A public `airflow-dags`, `data-platform`, or similar repo is the strongest possible tech stack confirmation — treat it as equivalent to a job posting mentioning Airflow. If no GitHub org found, record "No public GitHub org found."
+
+11. **Conference & Community Speaker Signals** — two parallel searches:
+   ```
+   WebSearch('"{COMPANY_NAME}" (site:airflowsummit.org OR "dbt Coalesce" OR "Data Council" OR "Spark+AI Summit" OR "DataEngConf" OR "PyData")')
+   WebSearch('"{COMPANY_NAME}" employee speaker (airflow OR dbt OR spark OR kafka OR "data pipeline") (conference OR summit OR meetup) after:2024-01-01')
+   ```
+   Extract: speaker name + title; conference name; talk title; tools mentioned; date. A current employee speaking at Airflow Summit or dbt Coalesce is extremely high-confidence stack confirmation — treat as equivalent to a confirmed Airflow mention in a job posting. If nothing found, record "No conference speaker signals found."
 
 **Batch B — fire after Batch A completes (depends on 3a and 6 results):**
 
@@ -350,6 +368,21 @@ For each case study found:
 - **Business problem described**: [verbatim quote — maps to Astronomer use cases]
 - **Source URL**:
 
+### GitHub Org
+**GitHub org found**: [Yes — URL / No]
+**Relevant repos**: [list repo names — e.g. airflow-dags, data-platform, dbt-models, ml-pipelines]
+**Stack confirmation**: [tools confirmed from repo names/contents — Airflow / dbt / Spark / etc.]
+**Signal**: [e.g. "public airflow-dags repo = confirmed Airflow user" / "No GitHub org found"]
+
+### Conference & Speaker Signals
+For each signal found:
+- **Speaker name + title**:
+- **Conference + date**:
+- **Talk title**:
+- **Tools mentioned**:
+- **Signal**: [e.g. "VP Data Engineering spoke at Airflow Summit 2025 = confirmed Airflow user and champion"]
+[If nothing found: "No conference speaker signals found."]
+
 ---
 
 ## SOURCE: LEADFEEDER
@@ -446,6 +479,7 @@ In a single generation pass, produce the fit score section followed by the accou
 - New hiring signals mentioning Airflow/orchestration/data platform
 - New Common Room contacts with VP Eng / Head of Data titles
 - New funding or acquisitions
+- **Signal lost**: if a previously cited high-signal finding is no longer present in this run, note it explicitly — e.g. "Signal lost: Airflow job posting (Senior Data Engineer, cited 2026-01-15) no longer found — likely filled or expired" or "Signal lost: key contact [Name] no longer appears at company." This is critical context for score drops — the changelog entry should explain *why* the score changed, not just *that* it changed.
 
 ```markdown
 # Account Research Report: {COMPANY_NAME}
@@ -621,9 +655,9 @@ else:
 ```
 Skip only companies that return `SKIP`. Incomplete or missing reports always run.
 
-### Batch Step 4: Process Companies (Groups of 3 Simultaneous Subagents)
+### Batch Step 4: Process Companies (Groups of 5 Simultaneous Subagents)
 
-Process companies in groups of 3. For each group of up to 3 unprocessed companies:
+Process companies in groups of 5. For each group of up to 5 unprocessed companies:
 
 **a) Pre-match Leadfeeder for all companies in the group** (before spawning any subagents):
 For each company, search the pre-fetched leads for a record where `name` or `website` matches `{COMPANY_NAME}` or `{DOMAIN}`. Store as `LEADFEEDER_MATCH`:
@@ -697,7 +731,7 @@ or on failure:
 **g) Update batch summary CSV for all companies in the group**, then pause 2 seconds before the next group.
 
 ### Batch Step 5: Chunking
-If CSV has >50 companies: process in chunks of 50 (i.e. ~17 groups of 3), pause 10 seconds between chunks.
+If CSV has >50 companies: process in chunks of 50 (i.e. ~10 groups of 5), pause 10 seconds between chunks.
 
 ### Batch Step 6: Generate Batch Summary
 
