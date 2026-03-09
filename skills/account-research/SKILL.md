@@ -33,17 +33,36 @@ Run before spawning agents:
 **a) Gong index pre-check**:
 ```bash
 python3 -c "
-import json, os, sys
+import json, os, sys, time
 company = sys.argv[1]
-with open(os.path.expanduser('~/claude-work/gong-cache/all_calls/calls.json')) as f:
+cache_path = os.path.expanduser('~/claude-work/gong-cache/all_calls/calls.json')
+if not os.path.exists(cache_path):
+    print('GONG_MATCH: index unavailable')
+    sys.exit(0)
+age_days = (time.time() - os.path.getmtime(cache_path)) / 86400
+if age_days > 7:
+    print(f'GONG_MATCH: index stale ({age_days:.0f} days old) — will query API directly')
+    sys.exit(0)
+with open(cache_path) as f:
     calls = json.load(f)
 matches = [c for c in calls if company.lower() in (c.get('crm_account_name') or '').lower()]
 print(f'GONG_MATCH: {len(matches)} calls found')
 " "{COMPANY_NAME}" 2>/dev/null || echo "GONG_MATCH: index unavailable"
 ```
-If `0 calls found`, set `GONG_HAS_CALLS=false` — skip Gong in Agent 2 and record "No prior Gong calls found. Cold outreach." If index unavailable, run Gong as normal.
+If `0 calls found`, set `GONG_HAS_CALLS=false` — skip Gong in Agent 2 and record "No prior Gong calls found. Cold outreach." If index is unavailable or stale (>7 days old), run Gong as normal.
 
-**b) Apollo key check**:
+**b) Prompt template check**:
+```bash
+for f in ~/claude-work/research-assistant/prompts/01_fit_scoring.md \
+          ~/claude-work/research-assistant/prompts/02_account_research.md; do
+  [ -f "$(eval echo $f)" ] \
+    && echo "TEMPLATE OK: $f" \
+    || { echo "TEMPLATE MISSING: $f — cannot generate report. Aborting."; exit 1; }
+done
+```
+If either file is missing, stop immediately. Do not proceed — the report will be incomplete without the scoring rubric and AE brief template.
+
+**c) Apollo key check**:
 ```bash
 [ -n "$APOLLO_API_KEY" ] && echo "APOLLO: key set" || echo "APOLLO: no key — will skip Step 8"
 ```
@@ -327,6 +346,10 @@ In a single generation pass, produce the fit score section followed by the accou
 
 ### Step 7: Save Report
 
+Create the directory if it doesn't exist, then write the file:
+```bash
+mkdir -p ~/claude-work/research-assistant/outputs/accounts/{company_slug}/
+```
 Overwrite: `~/claude-work/research-assistant/outputs/accounts/{company_slug}/report.md`
 
 ### Step 8: Update Apollo Account_Research Field
@@ -346,10 +369,26 @@ Skip entirely if no `APOLLO_API_KEY` (from pre-flight). Log "Apollo sync skipped
 
 2. Write report and verify success:
    ```bash
-   REPORT=$(cat ~/claude-work/research-assistant/outputs/accounts/{COMPANY_SLUG}/report.md)
+   # Truncate for Apollo field limit (~65,000 chars). Drops Full Transcripts first,
+   # then hard-truncates if still over. Local report.md is never modified.
+   APOLLO_REPORT=$(python3 -c "
+   import re, sys
+   content = open(sys.argv[1]).read()
+   if len(content) <= 60000:
+       print(content); sys.exit(0)
+   truncated = re.sub(
+       r'(### Full Transcripts\n).*',
+       r'\1[Truncated — see local report.md for full transcripts]',
+       content, flags=re.DOTALL
+   )
+   if len(truncated) > 60000:
+       truncated = truncated[:60000] + '\n\n[Report truncated at 60,000 chars for Apollo field limit]'
+   print(truncated)
+   " ~/claude-work/research-assistant/outputs/accounts/{COMPANY_SLUG}/report.md)
+
    RESPONSE=$(curl -s -w "\nHTTP_STATUS:%{http_code}" -X PUT "https://api.apollo.io/v1/accounts/{ACCOUNT_ID}" \
      -H "Content-Type: application/json" \
-     -d "{\"api_key\": \"$APOLLO_API_KEY\", \"typed_custom_fields\": {\"6998b33edacda9000deb48ca\": $(echo "$REPORT" | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read()))' )}}")
+     -d "{\"api_key\": \"$APOLLO_API_KEY\", \"typed_custom_fields\": {\"6998b33edacda9000deb48ca\": $(echo "$APOLLO_REPORT" | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read()))' )}}")
    HTTP_STATUS=$(echo "$RESPONSE" | grep "HTTP_STATUS:" | cut -d: -f2)
    if [ "$HTTP_STATUS" = "200" ]; then
      echo "Apollo: write succeeded"
@@ -382,7 +421,28 @@ Stop when a page returns <100 results. Store only: `id`, `name`, `website`, `vis
 
 For each company in the CSV:
 
-**a) Generate slug upfront** — do this before anything else. Rule: lowercase, spaces → underscores, remove all non-alphanumeric characters except underscores. Store as `COMPANY_SLUG` for use in Steps 3b, 4, and Apollo sync.
+**a) Generate slug upfront** — do this before anything else. Rule: lowercase, spaces → underscores, remove all non-alphanumeric characters except underscores. Then check for collision:
+```bash
+python3 -c "
+import os, re, sys
+name = sys.argv[1]
+base_slug = re.sub(r'[^a-z0-9_]', '', name.lower().replace(' ', '_'))
+slug = base_slug
+n = 2
+while True:
+    path = os.path.expanduser(f'~/claude-work/research-assistant/outputs/accounts/{slug}/report.md')
+    if not os.path.exists(path):
+        break  # directory is free
+    content = open(path).read()
+    # Check if the existing report is for the same company (case-insensitive name match)
+    if name.lower() in content[:500].lower():
+        break  # same company — safe to overwrite
+    slug = f'{base_slug}_{n}'
+    n += 1
+print(slug)
+" "{COMPANY_NAME}"
+```
+Store the result as `COMPANY_SLUG`.
 
 **b) Check for a valid existing report:**
 ```bash
@@ -487,7 +547,21 @@ If CSV has >50 companies: process in chunks of 50, pause 10 seconds between chun
 ```csv
 company,domain,score,grade,confidence,score_change,key_change,report_path,last_updated
 ```
-`score_change`: `+N`, `-N`, `0`, or `NEW`. `key_change`: one-line summary or "No changes". For `FAILED` companies, leave score/grade blank and set `key_change` to the failure reason.
+
+Extract score/grade/confidence from each completed report:
+```bash
+python3 -c "
+import re, sys
+content = open(sys.argv[1]).read()
+score = (re.search(r'Score[:\s]+(\d+)\s*/\s*20', content) or ['',''])[1] or \
+        (re.search(r'\b(\d+)/20\b', content) or ['',''])[1]
+grade = (re.search(r'Grade[:\s]+([A-F][+\-]?)', content) or ['',''])[1]
+conf  = (re.search(r'Confidence[:\s]+(HIGH|MEDIUM|LOW)', content) or ['',''])[1]
+print(f'{score}|{grade}|{conf}')
+" ~/claude-work/research-assistant/outputs/accounts/{COMPANY_SLUG}/report.md
+```
+
+`score_change`: compare extracted score against prior value in `batch_summary.csv` — format as `+N`, `-N`, `0`, or `NEW`. `key_change`: one-line summary or "No changes". For `FAILED` companies, leave score/grade/confidence blank and set `key_change` to the failure reason.
 
 ### Batch Step 7: Batch Summary Output
 
