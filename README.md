@@ -10,7 +10,7 @@ Claude Code skills for the Astronomer sales team. Research accounts, review call
 |-------|-------------|-------|
 | [`account-research`](#account-research) | Research any company for Astronomer fit — scored AE brief, tech stack, hiring signals, buying intent, and more | [Setup](#setup-account-research) |
 | [`account-question`](#account-question) | Ask anything about an account using Gong transcripts and saved research | [Setup](#setup-account-question) |
-| [`demo-prep`](#demo-prep) | Generate a ready-to-share SE demo prep brief from Gong call transcripts — attendees, current state, tech stack, use cases, demo flow, and watch-outs | [Setup](#setup-demo-prep) |
+| [`demo-prep`](#demo-prep) | Generate a ready-to-share SE demo prep brief from Gong call transcripts — attendees, current state, tech stack, use cases, etc. | [Setup](#setup-demo-prep) |
 | [`weekly-gong-review`](#weekly-gong-review) | Weekly call coaching report — scorecard, highlights, patterns, deep links to exact timestamps | [Setup](#setup-weekly-gong-review) |
 
 ---
