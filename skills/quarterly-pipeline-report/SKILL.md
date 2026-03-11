@@ -41,7 +41,7 @@ Default values:
 Execute the Python script:
 
 ```bash
-python3 /Users/vishwasrinivasan/Scripts/quarterly_pipeline_context.py \
+python3 ~/astronomer-claude-skills/scripts/quarterly_pipeline_context.py \
   --rep "{{rep_name}}" \
   --quarter "Q{{quarter}} {{year}}" \
   --fiscal
@@ -49,13 +49,15 @@ python3 /Users/vishwasrinivasan/Scripts/quarterly_pipeline_context.py \
 
 The script will:
 1. Load cached Gong data from `~/claude-work/gong-cache/all_calls/calls.json`
-2. Filter opportunities by rep + quarter using fiscal calendar (Q1=Feb-Apr, Q2=May-Jul, Q3=Aug-Oct, Q4=Nov-Jan)
-3. Generate main pipeline report with opportunities table
-4. For each unique account:
-   - Fetch Gong transcripts filtered to quarter dates (uses `gong_account_transcripts.py`)
+2. Auto-resolve rep name to email (e.g., "Thomas Messana" → "thomas.messana@astronomer.io")
+3. Validate rep exists in Gong data and has opportunities in the quarter
+4. Filter opportunities by rep + quarter using fiscal calendar (Q1=Feb-Apr, Q2=May-Jul, Q3=Aug-Oct, Q4=Nov-Jan)
+5. Generate main pipeline report with opportunities table
+6. For each unique account:
+   - Fetch Gong transcripts filtered to quarter dates (uses cached transcripts)
    - Copy existing research file if found in `~/Account Context/[Company]/`
-5. Create organized folder structure at `~/Account Context/Q{N}_{YEAR}_Pipeline/`
-6. Print execution summary
+7. Create organized folder structure at `~/Pipeline Reports/[Rep Name]/Q{N}_{YEAR}/`
+8. Print execution summary
 
 ### Step 3: Present Results
 
@@ -69,7 +71,7 @@ After the script completes, show the user a formatted summary:
   • Total Pipeline Value: $[amount]
   • Top Stage: [stage_name] ([count] deals, $[amount])
 
-📁 Location: ~/Account Context/Q{{quarter}}_{{year}}_Pipeline/
+📁 Location: ~/Pipeline Reports/{{rep_name}}/Q{{quarter}}_{{year}}/
 
 📋 Account Context Generated:
   • [X] accounts with Gong transcripts
@@ -107,8 +109,8 @@ Ask the user if they would like to:
 
 **Folder Structure:**
 ```
-~/Account Context/Q{N}_{YEAR}_Pipeline/
-├── Q{N}_{YEAR}_Pipeline_Report.md
+~/Pipeline Reports/[Rep Name]/Q{N}_{YEAR}/
+├── Pipeline_Report.md
 └── Accounts/
     ├── Company_A/
     │   ├── gong_transcripts.md
@@ -117,9 +119,18 @@ Ask the user if they would like to:
         └── gong_transcripts.md
 ```
 
+**Note:** Pipeline Reports are now separate from Account Context:
+- `~/Pipeline Reports/` = Temporal quarterly snapshots organized by rep
+- `~/Account Context/` = Permanent company research files
+
 ## Error Handling
 
-**If rep name not found:** Ask user for email address or add to script's REP_EMAIL_MAP
+**If rep name not found:** The script auto-constructs emails from names (e.g., "Thomas Messana" → "thomas.messana@astronomer.io") and validates against Gong data. If validation fails, it will show available reps in the system.
+
+**If no opportunities found:** Script validates that rep exists and has opportunities in the quarter. Provides helpful error messages if:
+- No calls with this rep in the specified quarter
+- Email address is incorrect
+- Rep has no opportunities closing in this quarter
 
 **If account has no Gong data:** Skip with warning, don't block other accounts
 
@@ -132,8 +143,18 @@ python3 ~/claude-work/gong_account_transcripts.py --sync
 
 ## Example Usage
 
+**User:** "Generate Q1 2026 pipeline report for Thomas Messana"
+
+**Assistant:** [Runs script with --rep "Thomas Messana" --quarter "Q1 2026"]
+
+**Script auto-resolves:** "Thomas Messana" → "thomas.messana@astronomer.io"
+
+**Output:** Shows formatted summary with pipeline metrics, location at `~/Pipeline Reports/Thomas Messana/Q1_2026/`, and account context stats.
+
 **User:** "Generate Q1 2026 pipeline report for Vishwa"
 
 **Assistant:** [Runs script with --rep "Vishwa" --quarter "Q1 2026"]
 
-**Output:** Shows formatted summary with pipeline metrics, location, and account context stats.
+**Script resolves:** "Vishwa" → "vishwa.srinivasan@astronomer.io" (via REP_EMAIL_MAP)
+
+**Output:** Shows formatted summary at `~/Pipeline Reports/Vishwa Srinivasan/Q1_2026/`
