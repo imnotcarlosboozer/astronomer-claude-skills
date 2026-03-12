@@ -712,7 +712,8 @@ The subagent has no access to this skill file. The task string must embed everyt
 ```
 Agent(
   subagent_type="general-purpose",
-  task="""
+  description="Research {COMPANY_NAME}",
+  prompt="""
 You are researching {COMPANY_NAME} ({DOMAIN}) for Astronomer sales fitness.
 Save the final report to: ~/claude-work/research-assistant/outputs/accounts/{COMPANY_SLUG}/report.md
 When finished, respond with only: "{COMPANY_NAME} complete" or "{COMPANY_NAME} error: [one-line reason]"
