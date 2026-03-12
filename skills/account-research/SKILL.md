@@ -68,6 +68,22 @@ If either file is missing, stop immediately. Do not proceed — the report will 
 [ -n "$APOLLO_API_KEY" ] && echo "APOLLO: key set" || echo "APOLLO: no key — will skip Step 8"
 ```
 
+**d) Leadfeeder cache check**:
+```bash
+python3 -c "
+import json, os, time
+cache = os.path.expanduser('~/claude-work/leadfeeder-cache/leads.json')
+if os.path.exists(cache):
+    age_hours = (time.time() - os.path.getmtime(cache)) / 3600
+    if age_hours < 24:
+        data = json.load(open(cache))
+        print(f'LEADFEEDER_CACHE_HIT: {len(data)} leads, {age_hours:.1f}h old')
+        exit(0)
+print('LEADFEEDER_CACHE_MISS')
+"
+```
+Store result as `LEADFEEDER_CACHE_STATUS`. If `CACHE_HIT`, load `~/claude-work/leadfeeder-cache/leads.json` into memory as `LEADFEEDER_LEADS` — Agent 2 will use these directly and skip all pagination. If `CACHE_MISS`, Agent 2 will paginate and populate the cache after.
+
 ### Step 3: Collect Data (2 Parallel Agents)
 
 Launch both agents simultaneously using the Agent tool with subagent_type="general-purpose":
@@ -210,75 +226,97 @@ Use Claude's built-in **WebSearch** and **WebFetch** tools for all queries. If `
 
 #### Agent 2: Internal Signals (Leadfeeder + Common Room + Gong)
 
-Run all three lookups. Skip Gong if `GONG_HAS_CALLS=false`.
+Launch **Leadfeeder, Common Room, and Gong simultaneously** — three parallel tool calls. Skip Gong if `GONG_HAS_CALLS=false`.
 
-**Leadfeeder** — paginate up to 5 pages to find a match:
+---
+
+**Leadfeeder** — use cache if available, otherwise paginate:
+
+If `LEADFEEDER_CACHE_HIT` from pre-flight: search `LEADFEEDER_LEADS` in memory for a record where `name` or `website` matches `{COMPANY_NAME}` or `{DOMAIN}`. If found, set `MATCHED_LEAD_ID` and call:
+```
+mcp__leadfeeder__get_lead_visits(account_id="281783", lead_id=MATCHED_LEAD_ID, start_date=[6mo ago], end_date=[today])
+```
+
+If `LEADFEEDER_CACHE_MISS`: paginate up to 5 pages to find a match:
 ```
 mcp__leadfeeder__get_leads(account_id="281783", start_date=[6mo ago], end_date=[today], page_size=100, page=1)
 ```
-Match by name or domain against `DOMAIN`. If found:
+Match by name or domain. If found, call `get_lead` and `get_lead_visits`. Then save all fetched leads to cache so future runs are instant:
+```bash
+mkdir -p ~/claude-work/leadfeeder-cache/
+python3 -c "
+import json, os
+leads = [...]  # list of {id, name, website, visit_count, last_visited_at} dicts collected above
+with open(os.path.expanduser('~/claude-work/leadfeeder-cache/leads.json'), 'w') as f:
+    json.dump(leads, f)
+print(f'Cached {len(leads)} leads')
+"
 ```
-mcp__leadfeeder__get_lead(account_id="281783", lead_id=MATCHED_LEAD_ID)
-mcp__leadfeeder__get_lead_visits(account_id="281783", lead_id=MATCHED_LEAD_ID, start_date=[6mo ago], end_date=[today])
-```
+
 Keep only: `lead_id`, `name`, `website`, `visit_count`, `last_visited_at`, and per-visit `url`/`date`/`duration`.
 
-**Common Room** (if connected) — run in parallel with Leadfeeder:
+---
 
-1. Org lookup:
-   ```
-   mcp__commonroom__commonroom_list_objects(
-     objectType="Organization",
-     filter={type:"and", clauses:[{type:"stringFilter", field:"companyWebsite", params:{op:"like", value:"{DOMAIN}"}}]},
-     properties=["about","employees","location","subIndustry","revenueRangeMin","revenueRangeMax","leadScores","topContacts","contactsCount","tags","researchResults"],
-     limit=1
-   )
-   ```
+**Common Room** (if connected) — run in parallel with Leadfeeder and Gong:
 
-2. Contacts (if org found):
-   ```
-   mcp__commonroom__commonroom_list_objects(
-     objectType="Contact",
-     filter={type:"and", clauses:[{type:"stringFilter", field:"companyWebsite", params:{op:"like", value:"{DOMAIN}"}}]},
-     properties=["primaryEmail","title","fullName","recentActivities","recentWebPages","recentWebVisitsNumber","leadScores","profiles","sparkSummary"],
-     sort="latest_activity", direction="desc", limit=10
-   )
-   ```
+**Step 1 — Org lookup** (required first, everything else depends on this):
+```
+mcp__commonroom__commonroom_list_objects(
+  objectType="Organization",
+  filter={type:"and", clauses:[{type:"stringFilter", field:"companyWebsite", params:{op:"like", value:"{DOMAIN}"}}]},
+  properties=["about","employees","location","subIndustry","revenueRangeMin","revenueRangeMax","leadScores","topContacts","contactsCount","tags","researchResults"],
+  limit=1
+)
+```
 
-   For each contact, assign a value tier based on title:
-   - **HIGH** (decision-makers/champions): VP/Director of Engineering, Head/Director of Data, Data Platform Engineer/Manager, Data Architect, ML Platform, Staff/Principal Data Engineer
-   - **MED** (users, not buyers): Data Engineer, Analytics Engineer, Data Scientist, Data Analyst
-   - **LOW** (not relevant for outreach): Marketing, Sales, Finance, HR, other non-technical roles
+**Step 2 — After org lookup resolves, fire all three simultaneously in parallel:**
 
-   Flag any HIGH-tier contacts visiting Astronomer pages — that's an active buying signal.
+2a. **Contacts**:
+```
+mcp__commonroom__commonroom_list_objects(
+  objectType="Contact",
+  filter={type:"and", clauses:[{type:"stringFilter", field:"companyWebsite", params:{op:"like", value:"{DOMAIN}"}}]},
+  properties=["primaryEmail","title","fullName","recentActivities","recentWebPages","recentWebVisitsNumber","leadScores","profiles","sparkSummary"],
+  sort="latest_activity", direction="desc", limit=10
+)
+```
 
-3. Recent activity (if org found, use orgId):
-   ```
-   mcp__commonroom__commonroom_list_objects(
-     objectType="Activity",
-     filter={type:"and", clauses:[
-       {type:"stringFilter", field:"orgId", params:{op:"eq", value:"{ORG_ID}"}},
-       {type:"dateRangeFilter", field:"activityTime", params:{op:"in", value:"P90D", min:null, max:null}}
-     ]},
-     properties=["content","url","activityTime","providerName"],
-     sort="activityTime", direction="desc", limit=20
-   )
-   ```
+2b. **Recent activity** (only if orgId found):
+```
+mcp__commonroom__commonroom_list_objects(
+  objectType="Activity",
+  filter={type:"and", clauses:[
+    {type:"stringFilter", field:"orgId", params:{op:"eq", value:"{ORG_ID}"}},
+    {type:"dateRangeFilter", field:"activityTime", params:{op:"in", value:"P90D", min:null, max:null}}
+  ]},
+  properties=["content","url","activityTime","providerName"],
+  sort="activityTime", direction="desc", limit=20
+)
+```
 
-4. Website visits (if contacts found):
-   ```
-   mcp__commonroom__commonroom_list_objects(
-     objectType="WebsiteVisit",
-     filter={type:"and", clauses:[
-       {type:"and", target:"Contact", objectConfigId:null, targetAssocPaths:null,
-        clauses:[{type:"stringFilter", field:"companyWebsite", params:{op:"like", value:"{DOMAIN}"}}]},
-       {type:"dateRangeFilter", field:"visitTime", params:{op:"in", value:"P90D", min:null, max:null}}
-     ]},
-     properties=["url"], limit=20
-   )
-   ```
+2c. **Website visits**:
+```
+mcp__commonroom__commonroom_list_objects(
+  objectType="WebsiteVisit",
+  filter={type:"and", clauses:[
+    {type:"and", target:"Contact", objectConfigId:null, targetAssocPaths:null,
+     clauses:[{type:"stringFilter", field:"companyWebsite", params:{op:"like", value:"{DOMAIN}"}}]},
+    {type:"dateRangeFilter", field:"visitTime", params:{op:"in", value:"P90D", min:null, max:null}}
+  ]},
+  properties=["url"], limit=20
+)
+```
 
-**Gong** (only if `GONG_HAS_CALLS=true` or index was unavailable):
+For each contact from 2a, assign a value tier:
+- **HIGH** (decision-makers/champions): VP/Director of Engineering, Head/Director of Data, Data Platform Engineer/Manager, Data Architect, ML Platform, Staff/Principal Data Engineer
+- **MED** (users, not buyers): Data Engineer, Analytics Engineer, Data Scientist, Data Analyst
+- **LOW** (not relevant for outreach): Marketing, Sales, Finance, HR, other non-technical roles
+
+Flag any HIGH-tier contacts visiting Astronomer pages — that's an active buying signal.
+
+---
+
+**Gong** (only if `GONG_HAS_CALLS=true` or index was unavailable) — run in parallel with Leadfeeder and Common Room:
 ```bash
 python3 -u ~/claude-work/gong_account_transcripts.py "{COMPANY_NAME}" --stdout
 ```

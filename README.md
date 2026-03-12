@@ -492,13 +492,13 @@ Optional daily sync cron (recommended for large Gong instances):
 <details>
 <summary>QMD semantic search integration</summary>
 
-**What**: Convert Gong JSON transcripts to markdown for instant semantic search via QMD
+**What**: QMD indexes Gong transcript markdown files and research reports for fast semantic search. Used by `account-question` to surface relevant transcript passages without loading everything, and to enable cross-account queries like "which accounts mentioned Dagster as a competitor?".
 
-**Why**: Skip API calls for cached accounts (4-6x faster) + enable cross-account intelligence queries
+**Where it's used**: `account-question` automatically checks QMD before falling back to the transcript script. If QMD is not set up, the skill works normally — it just uses the script path.
 
 **Setup**:
 
-1. **Install QMD MCP server** (add to `~/.claude/settings.json`):
+1. **Install QMD MCP server** — add to `~/.claude/settings.json`:
 ```json
 {
   "mcpServers": {
@@ -510,37 +510,49 @@ Optional daily sync cron (recommended for large Gong instances):
 }
 ```
 
-2. **Convert existing transcripts to markdown**:
+2. **Copy the conversion script**:
 ```bash
-python3 gong_json_to_markdown.py --all
+cp gong_json_to_markdown.py ~/claude-work/gong_json_to_markdown.py
 ```
 
-3. **Index in QMD**:
+3. **Convert existing transcripts to markdown**:
 ```bash
+python3 ~/claude-work/gong_json_to_markdown.py --all
+```
+
+4. **Index in QMD and generate embeddings**:
+```bash
+cd ~/claude-work
 npx -y @tobilu/qmd update gong
 npx -y @tobilu/qmd embed
 ```
 
-4. **Test semantic search**:
+5. **Verify**:
 ```bash
-npx -y @tobilu/qmd query "Kubernetes migration challenges" -c gong
-npx -y @tobilu/qmd query "pricing objections" -c gong
+npx -y @tobilu/qmd query "data orchestration pain points" -c gong
 ```
 
-**Architecture**: Dual-format strategy maintains both JSON (source of truth) and markdown (QMD index). The conversion script tracks staleness via `metadata.json` timestamps and auto-updates when JSON changes.
-
-**Cross-account queries**: Search across all cached accounts semantically:
+**Cross-account queries** (from CLI):
 ```bash
 npx -y @tobilu/qmd query "accounts discussing Dagster as competitor" -c gong
 npx -y @tobilu/qmd query "MWAA migration concerns" -c gong
 ```
 
-**Automated sync**: Add to your daily Gong cron:
+**Automated sync** — add to your daily Gong cron so the index stays fresh:
 ```bash
 # crontab -e
 0 6 * * * cd ~/claude-work && python3 gong_account_transcripts.py --sync && python3 gong_json_to_markdown.py --sync && npx -y @tobilu/qmd update gong
 ```
 
-See [docs/qmd-integration-plan.md](docs/qmd-integration-plan.md) for full implementation details.
+**Architecture**: JSON remains the source of truth. Markdown files are generated alongside JSON and tracked via `metadata.json` timestamps — stale files are auto-detected on `--sync`. See [docs/qmd-integration-plan.md](docs/qmd-integration-plan.md) for full details.
+
+</details>
+
+<details>
+<summary>Leadfeeder cache</summary>
+
+Both `account-research` (single and batch) and subagents share a 24-hour disk cache at `~/claude-work/leadfeeder-cache/leads.json`. On a cache hit, the full Leadfeeder leads list is read from disk — no API pagination needed. Cache is populated automatically on first run (or when stale) and updated in place.
+
+This means repeated single-company runs within a day skip the 5-page Leadfeeder pagination entirely.
 
 </details>
