@@ -1,0 +1,24 @@
+{
+  "awsAuthRefresh": "aws sso login --profile BedrockPowerUser-045129524798",
+  "env": {
+    "CLAUDE_CODE_USE_BEDROCK": "1",
+    "AWS_PROFILE": "BedrockPowerUser-045129524798",
+    "AWS_REGION": "us-east-2"
+  },
+  "mcpServers": {
+    "exa": {
+      "url": "https://mcp.exa.ai/mcp?tools=web_search_exa,web_search_advanced_exa,get_code_context_exa,crawling_exa,company_research_exa,people_search_exa,deep_researcher_start,deep_researcher_check",
+      "env": {
+        "EXA_API_KEY": "42e55fd2-a6c4-4721-9779-b1e6924ce098",
+        "NODE_EXTRA_CA_CERTS": "/Users/vishwasrinivasan/.claude/cloudflare-gateway-ca.pem"
+      }
+    },
+    "exa-websets": {
+      "url": "https://websetsmcp.exa.ai/mcp?exaApiKey=42e55fd2-a6c4-4721-9779-b1e6924ce098"
+    },
+    "qmd": {
+      "command": "npx",
+      "args": ["-y", "@tobilu/qmd", "mcp"]
+    }
+  }
+}
