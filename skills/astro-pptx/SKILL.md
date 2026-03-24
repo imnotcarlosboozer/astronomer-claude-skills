@@ -148,5 +148,7 @@ Tell the user:
 
 ## Reference
 
-All brand colors, font sizes, dark/light rules, logo rules, and writing style are in
-`references/brand.md`. Read it before building.
+| File | Contents | When to read |
+|------|----------|--------------|
+| `references/brand.md` | Colors, fonts, dark/light rules, layouts, logo rules | Always — before writing any code |
+| `references/messaging.md` | Core positioning, stats, proof points, customer stories, narrative arcs, persona guide | For sales/customer-facing decks, or whenever you need accurate Astronomer claims |

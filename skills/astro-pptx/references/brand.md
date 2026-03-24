@@ -6,8 +6,9 @@
 
 | Name | Hex | Use |
 |------|-----|-----|
-| New Moon 80 | `#343247` | Primary dark background |
-| New Moon 70 | `#555261` | Secondary dark, body text on light |
+| New Moon 90 | `#1D1D2C` | Primary dark background (title slides, closing slides) |
+| New Moon 80 | `#343247` | Secondary dark background, dark cards |
+| New Moon 70 | `#555261` | Tertiary dark, body text on light |
 | Purple 60 | `#872DED` | Accent, links/CTAs on light bg |
 | Gold 40 | `#FFB32D` | Accent, links/CTAs on dark bg |
 | New Moon 10 | `#F0ECE5` | Light background, body text on dark |
@@ -16,10 +17,10 @@
 
 | Name | Hex | Use |
 |------|-----|-----|
-| Red 50 | `#F03A47` | Alerts, emphasis |
-| Blue 50 | `#2676FF` | Data, technical |
-| Green 50 | `#19BA5A` | Success, positive metrics |
-| Teal 50 | `#13BDD7` | Data pipelines, integrations |
+| Red 50 | `#F03A47` | Alerts, emphasis (accent/data only — never background fills) |
+| Blue 50 | `#2676FF` | Data, technical (accent/data only — never background fills) |
+| Green 50 | `#19BA5A` | Success, positive metrics (accent/data only — never background fills) |
+| Teal 50 | `#13BDD7` | Data pipelines, integrations (accent/data only — never background fills) |
 
 ### Logo Colors
 - On light backgrounds: `#2B215B` (deep purple)
@@ -33,7 +34,7 @@ Use for: title slide, closing slide, CTA slide, section dividers.
 
 | Element | Color |
 |---------|-------|
-| Background | New Moon 80 `#343247` or New Moon 70 `#555261` |
+| Background | New Moon 90 `#1D1D2C` (primary) or New Moon 80 `#343247` (cards/secondary) |
 | Slide title | White `#FFFFFF` |
 | Eyebrow / label | Gold 40 `#FFB32D` |
 | Body copy | New Moon 10 `#F0ECE5` |
@@ -90,19 +91,26 @@ unless the user explicitly requests it.
   - Good: "The future of data orchestration is here."
   - Good: "Why Astronomer?"  ← under 4 words, Title Case OK, no punctuation
 - **Oxford comma** required.
-- Tone: professional, confident, data-forward. Avoid buzzwords and filler.
+- **No em dashes** (--). Use periods or commas instead.
+- Tone: direct, punchy, confident, data-forward. Compression over completeness. Write for data engineers first, economic buyers second.
+- No corporate jargon: "leverage," "synergize," "best-in-class," buzzword stacking.
 - Never use exclamation points in headers.
+- **McKinsey-style slide titles**: the title should make the point, not just label the topic.
+  - Good: "95% of GenAI pilots stall before production."
+  - Bad: "GenAI challenges"
 
 ---
 
 ## Logo Rules
 
+- Always placed **bottom-left** on slides, with consistent margins.
 - Clear space: use the "A" rule — minimum padding equal to the height of the "A" in "Astronomer"
 - One color only: never two-tone or gradient
 - Approved colors: `#2B215B` on light, `#FFFFFF` on dark
 - Never stretch, rotate, add shadow, or change color
 - Never place on busy backgrounds or photography
 - Never use the icon and wordmark together on the same slide
+- **Never recreate or approximate the logo in python-pptx.** Instead, write `"ASTRONOMER"` in Roboto Mono, all caps, at ~10–11pt in the approved color, bottom-left. This is the correct stand-in when the actual logo file is unavailable.
 
 ---
 
@@ -164,10 +172,18 @@ Gold top stripe. Gold ALL CAPS eyebrow (e.g. "USE CASE 01").
 Large bold League Gothic headline across full width.
 Content area splits into left (process/how-it-works) and right (example/evidence).
 
+## Text Alignment
+
+- **All text is left-aligned.** Never center body text or paragraph copy.
+- Centering is only acceptable for isolated stat callout numbers on a dedicated stat slide.
+- Consistent left margin: keep content starting at the same x-coordinate across slides (~0.75–0.85").
+
+---
+
 ## Design Elements (decorative motifs)
 
 - **Space Math / Grid**: Use evenly-spaced lines or dot grids as subtle background texture
-- **Orbits**: Arc and circle shapes in New Moon colors — great for title slide backgrounds
+- **Orbits**: Arc and circle shapes in New Moon colors — only use on dark backgrounds. Spheres/dots should sit precisely ON the orbital paths, not floating freely.
 - **Textures**: Semi-transparent rectangle overlays to add depth
 - **Iconography**: Simple line-style icons (use text characters or Unicode symbols as proxies)
 - **ASCII graphics**: For technical/architecture slides, monospaced text art works well
