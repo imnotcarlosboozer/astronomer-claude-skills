@@ -36,6 +36,7 @@ Claude will detect what is already configured, fetch account IDs and field IDs a
 | Automation | What it does |
 |------------|-------------|
 | [`notion-todo-sync`](automations/notion-todo-sync.md) | Hourly cron — pulls your action items from new Gong calls and appends them to a Notion database |
+| [`daily-skill-review`](automations/daily-skill-review.md) | Daily cron — reviews skill usage from recent sessions, auto-updates skill descriptions, surfaces a summary at next session start |
 
 ---
 
