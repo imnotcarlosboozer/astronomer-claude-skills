@@ -250,12 +250,12 @@ Launch **Leadfeeder, Common Room, and Gong simultaneously** — three parallel t
 
 If `LEADFEEDER_CACHE_HIT` from pre-flight: search `LEADFEEDER_LEADS` in memory for a record where `name` or `website` matches `{COMPANY_NAME}` or `{DOMAIN}`. If found, set `MATCHED_LEAD_ID` and call:
 ```
-mcp__leadfeeder__get_lead_visits(account_id="281783", lead_id=MATCHED_LEAD_ID, start_date=[6mo ago], end_date=[today])
+mcp__leadfeeder__get_lead_visits({YOUR_LEADFEEDER_ACCOUNT_ID}, lead_id=MATCHED_LEAD_ID, start_date=[6mo ago], end_date=[today])
 ```
 
 If `LEADFEEDER_CACHE_MISS`: paginate up to 5 pages to find a match:
 ```
-mcp__leadfeeder__get_leads(account_id="281783", start_date=[6mo ago], end_date=[today], page_size=100, page=1)
+mcp__leadfeeder__get_leads({YOUR_LEADFEEDER_ACCOUNT_ID}, start_date=[6mo ago], end_date=[today], page_size=100, page=1)
 ```
 Match by name or domain. If found, call `get_lead` and `get_lead_visits`. Then save all fetched leads to cache so future runs are instant:
 ```bash
@@ -680,7 +680,7 @@ If `LEADFEEDER_CACHE_HIT`: load leads from `~/claude-work/leadfeeder-cache/leads
 
 If `LEADFEEDER_CACHE_MISS`: pull all leads via API (up to 20 pages of 100):
 ```
-mcp__leadfeeder__get_leads(account_id="281783", start_date=[6mo ago], end_date=[today], page_size=100, page=N)
+mcp__leadfeeder__get_leads({YOUR_LEADFEEDER_ACCOUNT_ID}, start_date=[6mo ago], end_date=[today], page_size=100, page=N)
 ```
 Stop when a page returns <100 results. Store only: `id`, `name`, `website`, `visit_count`, `last_visited_at`.
 
@@ -770,7 +770,7 @@ Do NOT return the report content in your response.
 
 === LEADFEEDER DATA (pre-fetched) ===
 {LEADFEEDER_MATCH}
-If a lead_id is provided above, call mcp__leadfeeder__get_lead_visits(account_id="281783", lead_id=<id>, start_date=<6mo ago>, end_date=<today>) to get page visit URLs.
+If a lead_id is provided above, call mcp__leadfeeder__get_lead_visits({YOUR_LEADFEEDER_ACCOUNT_ID}, lead_id=<id>, start_date=<6mo ago>, end_date=<today>) to get page visit URLs.
 If "no match", record "Not found" in the Leadfeeder section.
 
 === RESEARCH INSTRUCTIONS ===

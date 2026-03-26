@@ -24,8 +24,18 @@ Claude will detect what is already configured, fetch account IDs and field IDs a
 | [`demo-prep`](#demo-prep) | Generate a ready-to-share SE demo prep brief from Gong call transcripts — attendees, current state, tech stack, use cases, etc. |
 | [`weekly-gong-review`](#weekly-gong-review) | Weekly call coaching report — scorecard, highlights, patterns, deep links to exact timestamps |
 | [`quarterly-pipeline-report`](#quarterly-pipeline-report) | Generate quarterly pipeline report with Gong transcripts and research for each account |
+| [`apollo-add-to-sequences`](#apollo-add-to-sequences) | Add prospects from a CSV to Apollo sequences with auto contact enrichment and sequence activation |
+| [`astro-docs`](#astro-docs) | Answer any Astronomer/Astro product question by searching and fetching live from astronomer.io and the official docs |
 
 > Contributing? See [CONTRIBUTING.md](CONTRIBUTING.md) for the sanitization checklist, placeholder reference, and PR standards.
+
+---
+
+## Automations
+
+| Automation | What it does |
+|------------|-------------|
+| [`notion-todo-sync`](automations/notion-todo-sync.md) | Hourly cron — pulls your action items from new Gong calls and appends them to a Notion database |
 
 ---
 
@@ -110,7 +120,7 @@ Weekly call coaching report for an AE. Pulls every call they appeared on (not ju
 ```
 /weekly-gong-review                              # current week
 /weekly-gong-review week:2026-W09               # specific week
-/weekly-gong-review rep:"Alec Dolton"           # different rep
+/weekly-gong-review rep:"Jane Smith"            # different rep
 /weekly-gong-review rep:user@astronomer.io
 ```
 
@@ -151,6 +161,8 @@ Jump to the skill you want to use:
 - [demo-prep](#setup-demo-prep)
 - [weekly-gong-review](#setup-weekly-gong-review)
 - [quarterly-pipeline-report](#setup-quarterly-pipeline-report)
+- [apollo-add-to-sequences](#setup-apollo-add-to-sequences)
+- [astro-docs](#setup-astro-docs)
 
 ---
 
@@ -492,6 +504,111 @@ python3 ~/Scripts/quarterly_pipeline_context.py --rep "Vishwa" --quarter "Q1 202
 ```
 
 Output location: `~/Account Context/Q{N}_{YEAR}_Pipeline/`
+
+---
+
+### `astro-docs`
+Answer any question about how Astronomer or Astro works by searching and fetching live from astronomer.io and the official docs. Always fetches live — never answers from training data, since the product changes frequently.
+
+**Run it**: ask naturally — `"how does hibernation work in Astro?"`, `"what's the difference between a standard and dedicated cluster?"`, `"does Astro support SSO enforcement?"`
+
+**Output**: Direct answer grounded in the current docs, with source URLs so the user can read further.
+
+**Requires**: No additional setup — uses built-in WebFetch and Exa search tools (Exa optional; falls back to WebFetch-only if not configured)
+
+---
+
+### `apollo-add-to-sequences`
+Add prospects from a CSV to Apollo sequences with automatic contact enrichment and sequence activation. Supports 800+ sequences via pagination, webinar ATTENDED/NO SHOW routing, and auto-activation after enrollment.
+
+**Run it**: mention a CSV path — `"~/Downloads/report.csv add these to apollo sequences"`
+
+**Output**: Enrolls contacts, creates missing records via Apollo enrichment, activates sequences, and prints a summary with any contacts needing manual intervention.
+
+```
+~/Downloads/report.csv add these to apollo sequences
+add contacts from ~/Downloads/outreach.csv to sequences
+```
+
+**CSV format**: `First Name`, `Last Name`, `Email`, `Recommended Outreach Sequence`, `Last Activity` (optional)
+
+**Requires**: `APOLLO_API_KEY` env var + `pip install requests` (see [Setup](#setup-apollo-add-to-sequences))
+
+---
+
+### Setup: astro-docs
+
+No external credentials or MCP servers required. The skill uses WebFetch (built-in) to fetch live pages from astronomer.io. If the Exa MCP is configured, it will use Exa search first to find the most relevant doc pages before fetching.
+
+**1. Install the skill**
+
+```bash
+mkdir -p ~/.claude/skills/astro-docs
+cp skills/astro-docs/SKILL.md ~/.claude/skills/astro-docs/SKILL.md
+```
+
+Restart Claude Code.
+
+**2. Run it**
+
+```
+how does hibernation work in Astro?
+what's the difference between a standard and dedicated cluster?
+does Astro support SSO enforcement — which tier requires it?
+```
+
+Claude will search astronomer.io and the docs, fetch the relevant pages, and answer with source URLs.
+
+---
+
+### Setup: apollo-add-to-sequences
+
+**1. Install the skill**
+
+```bash
+mkdir -p ~/.claude/skills/apollo-add-to-sequences
+cp skills/apollo-add-to-sequences/SKILL.md ~/.claude/skills/apollo-add-to-sequences/SKILL.md
+```
+
+Restart Claude Code.
+
+**2. Copy the script**
+
+```bash
+mkdir -p ~/claude-work/scripts
+cp scripts/add_to_apollo_sequences.py ~/claude-work/scripts/
+cp scripts/apollo_config.py ~/claude-work/scripts/
+```
+
+**3. Install dependencies**
+
+```bash
+pip install requests
+```
+
+**4. Set your Apollo API key**
+
+```bash
+# Add to ~/.zshrc or ~/.bash_profile
+export APOLLO_API_KEY=your_apollo_api_key
+```
+
+```bash
+source ~/.zshrc
+```
+
+**5. Run it**
+
+```
+~/Downloads/report.csv add these to apollo sequences
+```
+
+Or directly:
+
+```bash
+cd ~/claude-work/scripts
+python3 add_to_apollo_sequences.py ~/Downloads/report.csv
+```
 
 ---
 
