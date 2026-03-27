@@ -26,6 +26,7 @@ Claude will detect what is already configured, fetch account IDs and field IDs a
 | [`quarterly-pipeline-report`](#quarterly-pipeline-report) | Generate quarterly pipeline report with Gong transcripts and research for each account |
 | [`apollo-add-to-sequences`](#apollo-add-to-sequences) | Add prospects from a CSV to Apollo sequences with auto contact enrichment and sequence activation |
 | [`astro-docs`](#astro-docs) | Answer any Astronomer/Astro product question by searching and fetching live from astronomer.io and the official docs |
+| [`snowflake-query`](#snowflake-query) | Query Astronomer's Snowflake warehouse efficiently — full table map, join patterns, and optimization rules baked in. Self-improving via daily cron. |
 
 > Contributing? See [CONTRIBUTING.md](CONTRIBUTING.md) for the sanitization checklist, placeholder reference, and PR standards.
 
@@ -706,3 +707,22 @@ Both `account-research` (single and batch) and subagents share a 24-hour disk ca
 This means repeated single-company runs within a day skip the 5-page Leadfeeder pagination entirely.
 
 </details>
+
+---
+
+### `snowflake-query`
+
+Query Astronomer's Snowflake data warehouse efficiently. Knows the full HQ database schema, join patterns, and optimization rules — writes correct queries on the first try without schema exploration.
+
+**Invoke it**: ask any question requiring Snowflake data — `"how much did Pulumi spend yesterday"`, `"show me all users for Huli"`, `"which accounts are over 80% credit utilization"`
+
+**What's baked in:**
+- Full table map across `IN_*`, `MODEL_*`, `METRICS_*`, and `MART_*` schemas
+- Standard join patterns (account lookup → metrics, users for account, usage vs. contract)
+- `*_MULTI` table rules (always filter `TIME_GRAIN` + `DATE`)
+- Anti-patterns for the largest tables (7.4B-row `TASK_RUNS`, etc.)
+- Self-updating: daily cron appends learned patterns from actual query history
+
+**Setup**: Requires Snowflake MCP server + RSA key pair auth configured (included in `/setup`).
+
+**Self-improvement**: A daily cron at 8:17 AM reviews query history from the past 24 hours, extracts new patterns and corrections, and appends them to the `Learned Patterns Log` section. If anything meaningful changed, it auto-commits and pushes.
