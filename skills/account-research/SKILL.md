@@ -340,7 +340,7 @@ If no results, try a looser name match (first word only, or known abbreviations)
 
 **Email history**: Not available via Snowflake — record "Email history not available (Snowflake source)." in the Email History section.
 
-**Gong transcript size cap**: Retrieve all calls. If the total transcript text exceeds 30,000 words, keep full metadata for every call (date, participants, `CALL_BRIEF`, `CALL_NEXT_STEPS`) but truncate `FULL_TRANSCRIPT` to 1,000 words per call. Note the truncation: "Transcripts truncated: full metadata for all N calls, transcript bodies capped at 1,000 words each."
+**All transcript data must be preserved in full.** Do not truncate, summarize, or drop any calls or transcript content. Return every call and every word of `FULL_TRANSCRIPT` exactly as stored in Snowflake.
 
 ### Step 4: Assemble RAW INTELLIGENCE Block
 
