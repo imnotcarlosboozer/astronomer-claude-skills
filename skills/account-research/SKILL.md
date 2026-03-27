@@ -31,26 +31,15 @@ Extract `COMPANY_NAME` and `DOMAIN`. If only a name is given, use web search to 
 
 Run before spawning agents:
 
-**a) Gong index pre-check**:
-```bash
-python3 -c "
-import json, os, sys, time
-company = sys.argv[1]
-cache_path = os.path.expanduser('~/claude-work/gong-cache/all_calls/calls.json')
-if not os.path.exists(cache_path):
-    print('GONG_MATCH: index unavailable')
-    sys.exit(0)
-age_days = (time.time() - os.path.getmtime(cache_path)) / 86400
-if age_days > 7:
-    print(f'GONG_MATCH: index stale ({age_days:.0f} days old) — will query API directly')
-    sys.exit(0)
-with open(cache_path) as f:
-    calls = json.load(f)
-matches = [c for c in calls if company.lower() in (c.get('crm_account_name') or '').lower()]
-print(f'GONG_MATCH: {len(matches)} calls found')
-" "{COMPANY_NAME}" 2>/dev/null || echo "GONG_MATCH: index unavailable"
+**a) Gong pre-check** — query Snowflake directly (no local cache needed):
+```sql
+SELECT COUNT(*) AS call_count
+FROM HQ.MODEL_CRM_SENSITIVE.GONG_CALL_TRANSCRIPTS t
+JOIN HQ.MODEL_CRM_SENSITIVE.GONG_CALLS c ON t.CALL_ID = c.CALL_ID
+WHERE UPPER(t.ACCT_NAME) LIKE UPPER('%{COMPANY_NAME}%')
+  AND c.IS_DELETED = FALSE
 ```
-If `0 calls found`, set `GONG_HAS_CALLS=false` — skip Gong in Agent 2 and record "No prior Gong calls found. Cold outreach." If index is unavailable or stale (>7 days old), run Gong as normal.
+Use `mcp__snowflake__execute_query` to run this. If `call_count = 0`, set `GONG_HAS_CALLS=false` — skip Gong in Agent 2 and record "No prior Gong calls found. Cold outreach."
 
 **b) Prompt template check**:
 ```bash
@@ -332,13 +321,27 @@ Flag any HIGH-tier contacts visiting Astronomer pages — that's an active buyin
 
 ---
 
-**Gong** (only if `GONG_HAS_CALLS=true` or index was unavailable) — run in parallel with Leadfeeder and Common Room:
-```bash
-python3 -u ~/claude-work/gong_account_transcripts.py "{COMPANY_NAME}" --stdout
-```
-Try name variations if no match. The script automatically fetches email history alongside transcripts (gracefully skipped if Gong email integration is not configured). Extract from both calls and emails: call dates, participants, topics, pain points, tech stack mentions, deal stage, follow-up items, and any email thread context (subject lines, email direction, key content).
+**Gong** (only if `GONG_HAS_CALLS=true`) — run in parallel with Leadfeeder and Common Room. Query Snowflake using `mcp__snowflake__execute_query`:
 
-**Gong transcript size cap**: If the returned transcripts total more than 30,000 words, keep only the 5 most recent calls and truncate each transcript body to 3,000 words. Preserve all metadata (date, participants, summary). Note the truncation in the RAW INTELLIGENCE block: "Transcripts truncated: kept 5 most recent of N total calls."
+```sql
+SELECT
+    t.CALL_ID, t.CALL_TITLE, t.CALL_URL, t.SCHEDULED_TS,
+    t.ACCT_NAME, t.OPP_NAME, c.OPP_STAGE_AT_CALL, c.CALL_DURATION,
+    t.CALL_BRIEF, t.CALL_NEXT_STEPS, t.ATTENDEES,
+    c.PRIMARY_EMPLOYEE, t.FULL_TRANSCRIPT
+FROM HQ.MODEL_CRM_SENSITIVE.GONG_CALL_TRANSCRIPTS t
+JOIN HQ.MODEL_CRM_SENSITIVE.GONG_CALLS c ON t.CALL_ID = c.CALL_ID
+WHERE UPPER(t.ACCT_NAME) LIKE UPPER('%{COMPANY_NAME}%')
+  AND c.IS_DELETED = FALSE
+ORDER BY t.SCHEDULED_TS DESC
+LIMIT 10
+```
+
+If no results, try a looser name match (first word only, or known abbreviations). Extract from results: call dates, participants (from `ATTENDEES`), topics, pain points, tech stack mentions, deal stage (`OPP_STAGE_AT_CALL`), follow-up items (`CALL_NEXT_STEPS`), and full transcript text (`FULL_TRANSCRIPT`).
+
+**Email history**: Not available via Snowflake — record "Email history not available (Snowflake source)." in the Email History section.
+
+**Gong transcript size cap**: If the returned transcripts total more than 30,000 words, keep only the 5 most recent calls and truncate each `FULL_TRANSCRIPT` to 3,000 words. Preserve all metadata. Note the truncation: "Transcripts truncated: kept 5 most recent of N total calls."
 
 ### Step 4: Assemble RAW INTELLIGENCE Block
 
@@ -546,7 +549,7 @@ In a single generation pass, produce the fit score section followed by the accou
 
 **Generated**: {TODAY_DATE}
 **Website**: https://{DOMAIN}
-**Sources**: Web Search ✓ | Leadfeeder ✓/✗ | Common Room ✓/✗ | Gong ✓/✗
+**Sources**: Web Search ✓ | Leadfeeder ✓/✗ | Common Room ✓/✗ | Gong (Snowflake) ✓/✗
 
 [If M&A STATUS is anything other than NONE FOUND, insert this block immediately after the header:]
 > **M&A ALERT: {M&A STATUS}**
@@ -883,7 +886,7 @@ Also write a `failed_rerun.csv` to `~/claude-work/research-assistant/outputs/` c
 | **Common Room** | Key Contacts section: "No Common Room data found." Contact intelligence from Gong/web only. |
 | **Leadfeeder** | Buying Signals caps at 1. Note "No website visit data" in Website Engagement section. |
 | **Gong calls** | Prior Conversations: "No prior Gong calls found. Cold outreach." |
-| **Gong emails** | Email History: "Email integration not configured in this workspace." Calls still used normally. |
+| **Gong emails** | Email History: "Email history not available (Snowflake source)." — expected, not an error. |
 | **Apollo** | Skip write-back. Report saves locally. Note "Apollo sync skipped." |
 | **Nothing connected** | Run all research via Claude's built-in web search. Report generates with fit score, tech stack, hiring signals, and outreach brief. Confidence: MEDIUM or LOW. |
 
