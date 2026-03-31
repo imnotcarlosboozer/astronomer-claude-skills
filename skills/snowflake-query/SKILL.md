@@ -81,8 +81,11 @@ END_DATE     DATE       -- Period end
 | `MODEL_ASTRO.DEPLOYMENTS` | All deployments |
 | `MODEL_ASTRO.TASK_RUNS` | **7.4B rows / 1TB** — always filter by date |
 | `MODEL_ASTRO.DAG_RUNS` | **1.5B rows** — always filter by date |
-| `MODEL_CRM.SF_CONTACTS` | Salesforce contacts. Has `ASTRO_USER_ID` link. No email column (privacy) — use Salesforce URL. |
-| `MODEL_CRM.SF_CONTACTS` | Has `CONTACT_URL` (Salesforce link), `TITLE`, `PRIMARY_DOMAIN`, `ASTRO_USER_ID` |
+| `MODEL_CRM.SF_CONTACTS` | Salesforce contacts. Has `ASTRO_USER_ID` link. No email column (privacy) — use Salesforce URL. Has `CONTACT_URL`, `TITLE`, `PRIMARY_DOMAIN`. |
+| `MODEL_CRM.SF_ACCOUNTS` | Salesforce accounts. Key columns: `ACCT_NAME`, `OWNER_NAME`, `ZD_ORG_ID` (link to Zendesk). Use for rep-scoped queries or Zendesk joins. |
+| `MODEL_SUPPORT.ZD_ORG` | Zendesk org table. Join to `SF_ACCOUNTS` on `ZD_ORG_ID` for support ticket context. |
+| `MODEL_CRM_SENSITIVE.GONG_CALL_TRANSCRIPTS` | Gong transcript text. Key columns: `CALL_ID`, `ACCT_NAME`. Join to `GONG_CALLS` on `CALL_ID`. |
+| `MODEL_CRM_SENSITIVE.GONG_CALLS` | Gong call metadata. Key columns: `CALL_ID`, `IS_DELETED`. Always filter `IS_DELETED = FALSE`. |
 
 ### Layer 1 — IN (raw ingested)
 
@@ -175,13 +178,19 @@ WHERE UPPER(ACCT_NAME) LIKE '%CUSTOMER_NAME%'
 
 5. **Never `SELECT *` on wide tables**: `CURRENT_ASTRO_CUSTS` has 120+ columns. Select only what you need.
 
-6. **Avoid `MODEL_ASTRO.TASK_RUNS` and `DAG_RUNS` directly**: Use `METRICS_ASTRO.*` aggregates instead. Only touch raw runs if you need task-level detail, and always filter by a specific date range.
+6. **For optimization recommendations, always check `MODEL_ASTRO.TASK_RUNS` for the actual distribution**: Aggregate tables hide bimodal distributions. Example: `DEPLOYMENT_OPERATOR_ACTIVITY_MULTI` showed ExternalTaskSensor avg 32 min, but `TASK_RUNS` revealed 33% of tasks complete in <30s — a distribution that materially changes the recommendation. Always add `IS_TERMINAL = TRUE` and a date filter. **7.4B rows — always filter by date.**
 
 7. **`*_LATEST` tables are pre-filtered**: `SF_ACCT_FEATURE_STORE_LATEST`, `SF_ACCT_SCORES_LATEST`, etc. — no date filter needed.
 
 8. **Use `SAMPLE` for exploration**: `SELECT * FROM big_table SAMPLE (100 ROWS)` to spot-check data without a full scan.
 
 9. **Result cache**: Snowflake caches identical query results for 24h. Keep expensive base CTEs unchanged when iterating — only modify the outer SELECT.
+
+10. **Metronome billing lags 2–3 days behind actual config changes**: Do not use `METRONOME_COMPUTE_EVENTS` to infer current infrastructure state. A worker size appearing in billing doesn't mean that queue is still configured that way. Use `MODEL_ASTRO.WORKER_QUEUES` for current config.
+
+11. **`METRONOME_COMPUTE_EVENTS` has no cost column**: Must join to `METRONOME_RATE_CARD_ITEMS` on `PRICING_GROUP_OBJECT_HASH` and compute `COMPUTE_RUNTIME_SECONDS / 3600 * UNIT_PRICE`. Always scope `RATE_CARD_ITEMS` to the customer's specific `RATE_CARD_ID` first — otherwise you pull prices from other rate cards. Use `ASTRO_ORG_ID` (not `ORGANIZATION_ID`) to filter. `METRONOME_RATE_CARD_ITEMS` has a `PRICING_GROUP_OBJECT_DEFINITION` column — use `LIKE '%small%'` (or the desired scheduler size) to filter to specific rates without JSON parsing. `METRONOME_DEPLOYMENT_EVENTS` has both `EVENT_TS` and `START_TIMESTAMP` date columns — both work for date range filtering. `DEPLOYMENT_COST_MULTI` can be filtered by `METRONOME_ID` in addition to `ORG_ID`.
+
+12. **`DEPLOYMENT_OPERATOR_ACTIVITY_MULTI` requires `TIME_GRAIN = 'day'`**: The table stores day, roll_7d, roll_30d, and week rows for every period. Omitting this filter inflates counts by 40–50x. **Always include `TIME_GRAIN = 'day'` (or the intended grain explicitly).**
 
 ---
 
@@ -194,9 +203,21 @@ WHERE UPPER(ACCT_NAME) LIKE '%CUSTOMER_NAME%'
 
 ---
 
+## Auto-Update Instruction
+
+**At the end of every Snowflake session**, if any of the following occurred, append a new dated entry to the Learned Patterns Log:
+- A query failed due to a wrong column name, schema, or join — record the fix
+- An aggregate result was misleading and task-level data told a different story — record what table was better
+- A billing/config discrepancy was discovered — record the cause
+- A new table or join pattern was used successfully — record it
+
+Update this file directly in the repo (`/Users/joeykenney/claude-work/gtm-agent-repo/skills/snowflake-query/SKILL.md`) and sync to the local install (`/Users/joeykenney/.claude/skills/snowflake-query/SKILL.md`).
+
+---
+
 ## Learned Patterns Log
 
-This section is updated automatically by the daily skill-refresh cron. Each entry captures a query pattern that was used successfully or a correction to a prior approach.
+Each entry captures a query pattern that was used successfully or a correction to a prior approach.
 
 <!-- PATTERNS_LOG_START -->
 **2026-03-27** — Initial schema exploration. Key discoveries:
@@ -210,4 +231,17 @@ This section is updated automatically by the daily skill-refresh cron. Each entr
 
 **2026-03-30** — Schema correction from refresh run; no new user queries in past 24h:
 - `INFORMATION_SCHEMA.QUERY_HISTORY_BY_USER` does NOT have `PARTITIONS_SCANNED` or `PARTITIONS_TOTAL` columns — those only exist in `SNOWFLAKE.ACCOUNT_USAGE.QUERY_HISTORY` (requires elevated role). Use `BYTES_SCANNED` as the scan-size proxy when using the `INFORMATION_SCHEMA` table function.
+
+**2026-03-30** — Pulumi usage/cost analysis session. Key discoveries:
+- `DEPLOYMENT_OPERATOR_ACTIVITY_MULTI` requires `TIME_GRAIN = 'day'` — omitting it caused a 3% undercount (131,584 vs correct 135,092) because `roll_7d`/`roll_30d` rows partially overlapped the date range
+- `METRONOME_COMPUTE_EVENTS`: no cost column — must join `METRONOME_RATE_CARD_ITEMS` on `PRICING_GROUP_OBJECT_HASH`; always scope to customer's `RATE_CARD_ID` first; filter uses `ASTRO_ORG_ID` not `ORGANIZATION_ID`
+- Metronome billing lags 2–3 days: Pulumi's default queue showed A40 pods in billing 3 days after they'd already switched to A20. Don't use billing data to infer current queue config — use `MODEL_ASTRO.WORKER_QUEUES`
+- `MODEL_ASTRO.TASK_RUNS` has individual task durations and is the right table to check before making optimization recommendations. Aggregates mislead: ExternalTaskSensor avg was 32 min but 33% of tasks complete in <30s (upstream already done when sensor fires). Always check distribution, not just average.
+- `WORKER_QUEUES` correct column names: `WORKER_QUEUE_NAME`, `POD_SIZE`, `MIN_WORKER_COUNT`, `MAX_WORKER_COUNT`, `IS_DEFAULT`, `IS_DELETED`
+- `DEPLOYMENTS` org filter column is `ORG_ID` (not `ORGANIZATION_ID`)
+
+**2026-03-31** — Session covering rate card analysis and Zendesk/Gong table discovery:
+- Four new tables confirmed: `MODEL_CRM.SF_ACCOUNTS` (`OWNER_NAME`, `ZD_ORG_ID`), `MODEL_SUPPORT.ZD_ORG`, and `MODEL_CRM_SENSITIVE.GONG_CALL_TRANSCRIPTS`/`GONG_CALLS` (join on `CALL_ID`; always filter `IS_DELETED = FALSE` on GONG_CALLS; filter by `ACCT_NAME` on transcripts)
+- `METRONOME_RATE_CARD_ITEMS` has `PRICING_GROUP_OBJECT_DEFINITION` column — use `LIKE '%small%'` (or scheduler type) to filter scheduler-specific rates without parsing `PRICING_GROUP_KEYS` JSON
+- `METRONOME_DEPLOYMENT_EVENTS` has both `EVENT_TS` and `START_TIMESTAMP` date columns (confirmed both work for date range filtering); `DEPLOYMENT_COST_MULTI` can also be filtered by `METRONOME_ID` in addition to `ORG_ID`
 <!-- PATTERNS_LOG_END -->
