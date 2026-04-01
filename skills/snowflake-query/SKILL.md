@@ -22,6 +22,64 @@ The user has asked: {{args}}
 
 ---
 
+## Account ID Cache (Joey Kenney's Book of Business)
+
+Skip the `ACCT_NAME LIKE '%..%'` CTE lookup for these accounts — use IDs directly.
+
+| Account | ORG_ID | METRONOME_ID | ARR | Contract End |
+|---|---|---|---|---|
+| Third Point | `cl6e1hc82009l0s0ebuei60ec` | `406e7187-2fae-45d5-b96f-1c893bbf0e30` | $136K | 2026-05-15 |
+| Go Sonar (FreightWaves) | `cl8ub8vd001xe0uxz950r9c35` | `2d68588a-b985-43f8-a60f-75403ddcec18` | $78K | 2026-09-28 |
+| Advanced Symbolics | `clmz6bi9e00fm01hywjtgaj68` | `4441d863-d407-47dc-aa31-0171a3c78f40` | $54K | — |
+| Surge AI | `clthudyr0011301nzy9gvdtq1` | `33adbe27-fc52-4edb-bd06-d886927feed3` | $52K | — |
+| Boothbay Fund Management | `cmeohlt941c4f01pepwpyksne` | `1db2ab6c-8e65-408c-aaa0-cac2bcfce465` | $49K | — |
+| Premier Truck Rental LLC | `cmhbcy7ah01yj01nc3tmfooy5` | `6787d2e9-29cb-45ac-8452-15061763d15f` | $48K | 2026-10-31 |
+| MileIQ | `cm7wlc62d15j701q9oxzboucl` | `2816a23e-11e6-4818-a6b9-fb47a94ac20e` | $37K | 2026-04-06 |
+| Pulumi | `cmbz9v67x1tg201iyoi3kxpi2` | `cd3a1bf7-271b-499c-aaa2-7d7e9a4d4260` | $37K | 2026-08-18 |
+| Together Computer | `cmianzvn30dvy01kcmdamoe1q` | `e32e8a06-b47a-4453-b556-7e809ec7215c` | $36K | 2027-01-04 |
+| SpringWorks Therapeutics | `cm850f59l035g01ktwh5iwzpe` | `2c568dd9-ab11-4c29-a029-b8af1b7666a9` | $35K | 2026-04-13 |
+| Cordada | `clcuypvia0qe20t3d6c1if8ws` | `d83a4268-9deb-4369-b23f-2c56e728bab5` | $35K | 2027-01-04 |
+| Differential | `cljsvo6na00y101lvx7i51kjm` | `8e2c81c8-d8e6-4ab4-ba8b-3c28aeb1d581` | $35K | 2026-11-03 |
+| USAFacts | `clk31o2l600fs01hkyyw98pwt` | `4070cbd8-5721-46f6-8212-24d09dff4d49` | $32K | 2026-04-08 |
+| DLR | `cmc4xg1ih178v01ihhft678xg` | `2689990c-0ecc-486d-81cd-0ea4b12a3ba5` | $32K | 2026-07-24 |
+| Crexi | `cmhtofqia161w01me3veevo66` | `a2dd259a-1309-42ad-bc2a-89594808c2c8` | $30K | 2027-01-04 |
+| Rithm Capital | `cmf5gimkj3ls501psapalaz63` | `25f75fcb-5dc8-42d1-bbf3-898bf043e0f3` | $28K | 2028-10-31 |
+| GlossGenius | `cllmjc18y000801fgr9ehz27g` | `e3cfb8e8-d632-40ec-a9dd-8f1f12456298` | $28K | 2026-10-31 |
+| Parafin | `cljpyvrn4020t01lt2igt3kdo` | `ff00fbd8-f00c-4801-b7ef-29a34315557a` | $28K | 2026-08-22 |
+| Behaviour Interactive | `cl6fd5hg9010c0tzphpmgftz3` | `b658958a-42a3-4f14-b758-0f405ec50091` | $26K | 2026-10-10 |
+| Pretto | `cmk6y0dsn03dy01psb8earfkl` | `da14d290-2260-489c-9e3b-097636683397` | $25K | 2027-02-12 |
+| Pivotal Life Sciences | `clgzuej0u006t01lmwj6gigt3` | `9f55545c-61b7-4f36-8ae4-1ac8405f6020` | $25K | 2026-04-30 |
+| Ace 1 Media | `cly3qqsky145801k2ulltysqu` | `4a594f96-3f2a-4c11-a032-26305a8ee03f` | $25K | 2026-07-17 |
+| New Orleans Pelicans | `cm1du2l6y0zfs01j5dbi5wnxt` | `3a6ae7ce-859b-44c8-a9ce-e993d33727cb` | $24K | 2026-10-06 |
+| Saatchi Art | `cljsnv8kz00ut01gi8a2xpfcy` | `d28b22cf-e45a-42e4-af1c-f17e39249108` | $23K | 2027-01-29 |
+| Updater Inc. | `cloqcobtl003401kby4esrrmp` | `62b61b9d-ea01-41ea-a188-dc7c133fc839` | $22K | 2026-10-30 |
+| Middle Seat | `cmbqzrnkj1rge01lh73hyvhbl` | `9d7aa215-15a1-450b-b01d-5d0e4e2d6a68` | $21K | — |
+| NYCSBUS | `cl1w5kbm301ya0rzo0pyb7v1k` | `54369b0a-754c-4fa8-9004-7e7d291b781e` | $20K | 2026-03-31 |
+| NOW Insurance | `cloolp7z201yw01jhymmhlwwb` | `bc45e0fa-45ef-435b-8dfe-f570716b8512` | $18K | — |
+| Spoiler Alert | `cm6fgnbcj1ep501l3ilxb1xgj` | `4420b6b3-e761-4425-973b-25a007ec3b80` | $18K | 2027-02-27 |
+| JCA | `cmgv7px2p09ko01jxdnra9glk` | `c4392afb-73f5-4c0a-a7d0-a4bd14d20647` | $18K | — |
+| Draftea Technologies | `cl4eolzp300l20s0ec9gz9g2m` | `b2cd4ee8-a109-48b8-a93d-241dd73ef804` | $17K | 2026-05-31 |
+| Pyx Health | `cm976gqb51ila01madyh6c1mu` | `c6e007af-1a59-4df6-8928-4cada59cb45d` | $15K | — |
+| Black Crow AI | `clwqkqwwy0puu01nqtui7xyms` | `26c96d26-7530-4737-9c16-288025d248d7` | $15K | 2026-06-30 |
+| Hover | `clmkxwux3003201m2pdvybgtj` | `c9216665-f052-448f-938b-a7345b6ff770` | $14K | — |
+| Prizma | `clv5ueo3g054z01or4o0ztkft` | `528793e9-9d24-4891-a638-1be211aa779a` | $14K | — |
+| Panther Labs | `cl4rc9hvz004j0txb8jfw88f3` | `9b110534-a066-4740-aaff-a209fb2aaefc` | $13K | 2026-04-26 |
+| Huli | `clnmy428c008s01nx7hqs9w1t` | `423c2c9f-434c-4b9b-9f0d-479b9ed9f0a9` | $12K | — |
+| Envoy | `cln0iktux00uq01hyw80jht5v` | `583a55ee-5f9d-4936-b487-993ac4049b1d` | $12K | 2027-01-30 |
+| Tampa Bay Lightning | `clktxc1lr002401nzzajvletk` | `83b2beb0-d293-4af1-85b2-2789c4844a09` | $12K | 2026-10-30 |
+| Orita | `cma2t7w2j20uj01hvc0xjwrei` | `6ed17596-50e7-461f-b13e-14d1017404b2` | $12K | 2026-06-29 |
+| Sutco | `cln0nqfcz003x01nhjjv9osld` | `9be3e209-bc2d-4cd1-be7c-3f6ecbec59f8` | $12K | 2027-12-31 |
+| Rothy's | `clq0jrgbn00kl01m8ghcmw67f` | `8677403a-c9e3-4800-b2c8-3477df2d064e` | $11K | 2027-02-16 |
+| Lemba | `cm3pz2shq06w501np1yuy5iol` | `18c59364-2bc6-499b-a654-4dee8fa62216` | $11K | 2026-10-21 |
+| MarginEdge | `cm9n1pmd80ykw01m5bbkdmcv9` | `de1ed4b6-0c01-415c-86fe-5e56634292a9` | $10K | — |
+| RaveHealth | `cm05e7u59013n01n352gir6cb` | `9c7513f6-e811-4833-942a-271d414da30e` | $10K | 2026-09-30 |
+| MagicSchool AI | `cmfbox58l1icn01nt6bvlwg3n` | `36121aeb-26d0-4d21-8665-fb8595e63006` | $10K | 2026-11-02 |
+| PlaneSense | `clt68ead000js01k55vjqtek8` | `9f592c3a-09cc-47c2-829c-1ad2d99c6fc9` | $10K | 2026-04-30 |
+
+> **Note**: Cache generated 2026-04-01. Refresh periodically from `CURRENT_ASTRO_CUSTS WHERE OWNER_NAME ILIKE '%kenney%'`.
+
+---
+
 ## Database Architecture (HQ)
 
 The HQ database follows a layered architecture. Always query the highest layer that satisfies the question — it's faster and pre-joined.
@@ -114,6 +172,132 @@ END_DATE     DATE       -- Period end
 | `IN_ASTRO_DB_PROD.ORG_USER_RELATION` | Raw user↔org with `DELETED_AT` |
 | `IN_ASTRO_DB_PROD.ORGANIZATION` | Raw org with `BILLING_EMAIL` |
 | `IN_ASTRO_DB_PROD.USER_INVITE` | User invite records |
+
+---
+
+## Table Selection Decision Tree
+
+Use this before writing any query. Pick the first table that satisfies the question.
+
+**"What's the current state of an account?"**
+→ `MART_CUST.CURRENT_ASTRO_CUSTS` (ARR, usage, credit balance, health, contract dates, team)
+
+**"How has usage/cost trended over time?"**
+→ `METRICS_FINANCE.ORG_COST_MULTI` (cost) or `METRICS_ASTRO.ORG_ACTIVITY_MULTI` (tasks/DAGs)  
+→ Always add `TIME_GRAIN = 'day'` and a `DATE` range filter
+
+**"What are the deployment-level costs?"**
+→ `METRICS_FINANCE.DEPLOYMENT_COST_MULTI` — grain is `DEPLOYMENT_ID`
+
+**"What does the Metronome billing show?"**
+→ Credit balance: `MODEL_FINANCE.METRONOME_CREDIT_GRANTS`  
+→ Daily burn rate: `MODEL_FINANCE.METRONOME_CREDITS_DAILY`  
+→ Usage vs contract: `MODEL_FINANCE.METRONOME_USAGE_DAILY` (filter `IS_LATEST = TRUE`)  
+→ Invoices: `MODEL_FINANCE.METRONOME_INVOICES` (filter `IS_FINALIZED = TRUE AND IS_VOIDED = FALSE`)
+
+**"Who are the users on this account?"**
+→ `IN_ASTRO_DB_PROD.ORG_USER_RELATION` + `MODEL_ASTRO.USERS` (for email domain)  
+→ Then `MODEL_CRM.SF_CONTACTS` if you need title/SF URL (join on `ASTRO_USER_ID`)
+
+**"What's happening in Gong / what was discussed?"**
+→ `MODEL_CRM_SENSITIVE.GONG_CALL_TRANSCRIPTS` JOIN `GONG_CALLS` on `CALL_ID`  
+→ Always filter `GONG_CALLS.IS_DELETED = FALSE`  
+→ Search by `ACCT_NAME ILIKE '%name%'` — no account ID join needed
+
+**"What support tickets does this account have?"**
+→ `MODEL_SUPPORT.ZD_TICKETS` — but ZD_ORG_ID ≠ Astro ORG_ID  
+→ Bridge: `ZD_TICKETS.ORG_ID → MAPS.ZD_ORGS.ZD_ORG_ID → ACCT_ID`
+
+**"What's in the open sales pipeline?"**
+→ `MODEL_CRM.SF_OPPS` with `IS_OPEN = TRUE`  
+→ Filter by `OWNER_NAME` for rep-level, `ACCT_ID` for account-level
+
+**"How is this account tracking vs their contract?"**
+→ `MART_CUST.CURRENT_ASTRO_CUSTS` — `USAGE_VS_CONTRACT_TARGET_PCT_30D`, `PROJECTED_FULL_CREDIT_USE_DATE_30D`  
+→ For historical contract periods: `MODEL_CONTRACTS.SF_CUST_CONTRACTS` (filter `IS_ACTIVE_CONTRACT = TRUE AND IS_LATEST = TRUE`)
+
+**"What are the deployments / infrastructure configs?"**
+→ `MODEL_ASTRO.DEPLOYMENTS` (executor, scheduler size, cluster type, Airflow version)  
+→ `MODEL_ASTRO.WORKER_QUEUES` for current queue config (billing lags 2-3 days — don't use Metronome for this)
+
+**"What individual tasks ran and how long did they take?"**
+→ `MODEL_ASTRO.TASK_RUNS` — **7.4B rows, always filter by date**  
+→ Add `IS_TERMINAL = TRUE` and `OPERATOR_CLASS` filter to narrow scope
+
+**"Has this company been downloading Airflow / OSS?"**
+→ `MODEL_ECOSYSTEM.SCARF_COMPANY_ARTIFACT_EVENTS` — match on `COMPANY_DOMAIN`
+
+**"What MQLs has this account generated?"**
+→ `MODEL_CRM.SF_MQLS` — filter by `ACCT_ID`, check `REPORTING_CHANNEL`
+
+**"Unknown table or column — what exists?"**
+→ `MODEL_SNOWFLAKE.SNOWFLAKE_CURRENT_TABLES` — free discovery, has `TABLE_SIZE_GB`, `PRIMARY_KEY`, `FOREIGN_KEY`
+
+---
+
+## Common Date Range Snippets
+
+Copy-paste these directly into queries — no mental math needed.
+
+```sql
+-- Yesterday
+DATE = CURRENT_DATE - 1
+
+-- Last 7 days
+DATE >= DATEADD('day', -7, CURRENT_DATE)
+
+-- Last 30 days
+DATE >= DATEADD('day', -30, CURRENT_DATE)
+
+-- Last 90 days
+DATE >= DATEADD('day', -90, CURRENT_DATE)
+
+-- Current calendar month
+DATE >= DATE_TRUNC('month', CURRENT_DATE)
+
+-- Last full calendar month
+DATE >= DATE_TRUNC('month', DATEADD('month', -1, CURRENT_DATE))
+  AND DATE < DATE_TRUNC('month', CURRENT_DATE)
+
+-- Current quarter
+DATE >= DATE_TRUNC('quarter', CURRENT_DATE)
+
+-- Last full quarter
+DATE >= DATE_TRUNC('quarter', DATEADD('quarter', -1, CURRENT_DATE))
+  AND DATE < DATE_TRUNC('quarter', CURRENT_DATE)
+
+-- Current fiscal year (Astronomer FY = Feb 1 – Jan 31)
+DATE >= DATE_FROM_PARTS(
+    IFF(MONTH(CURRENT_DATE) >= 2, YEAR(CURRENT_DATE), YEAR(CURRENT_DATE) - 1), 2, 1)
+
+-- Since contract start (use with CURRENT_ASTRO_CUSTS join)
+DATE >= c.CONTRACT_START_DATE
+
+-- Trailing 12 months
+DATE >= DATEADD('month', -12, CURRENT_DATE)
+```
+
+---
+
+## Data Freshness / Lag Reference
+
+How stale can data be when you query it? Use this to set expectations and caveat outputs.
+
+| Source | Table(s) | Typical Lag | Notes |
+|---|---|---|---|
+| Salesforce → Snowflake | `SF_ACCOUNTS`, `SF_OPPS`, `SF_CONTACTS`, `SF_MQLS` | Same day (4–6h) | Fivetran sync runs hourly |
+| Astro product DB → Snowflake | `ORGANIZATIONS`, `DEPLOYMENTS`, `WORKER_QUEUES` | ~1h | Near real-time |
+| Astro task/DAG events | `TASK_RUNS`, `DAG_RUNS` | 1–2h | High-volume pipeline |
+| Metronome billing events | `METRONOME_COMPUTE_EVENTS`, `DEPLOYMENT_COST_MULTI` | **2–3 days** | Billing pipeline lag — don't use to infer current infra state |
+| Metronome invoices/credits | `METRONOME_INVOICES`, `METRONOME_CREDIT_GRANTS` | Same day when finalized | Check `IS_FINALIZED` flag |
+| Gong calls | `GONG_CALLS`, `GONG_CALL_TRANSCRIPTS` | **~24h** | Transcripts available next day |
+| Zendesk tickets | `ZD_TICKETS`, `ZD_TICKET_COMMENTS` | 1–2h | Near real-time |
+| Leadfeeder web visits | `LF_WEBSITE_VISITS` | **~48h** | Leadfeeder processing delay |
+| HG Insights tech signals | `SF_ACCOUNTS.HG_*` columns | **Weekly** | Refreshed via SF enrichment job |
+| MART_CUST aggregates | `CURRENT_ASTRO_CUSTS` | Daily (rebuilt overnight) | Freshest at start of business day |
+| MART_GTM scores | `SF_ACCT_SCORES`, `SF_ACCT_FEATURE_STORE` | Daily | |
+| Scarf OSS signals | `SCARF_COMPANY_ARTIFACT_EVENTS` | **~1 week** | Batch aggregation |
+| INFORMATION_SCHEMA query history | N/A | **45 min** | Use for recent query analysis |
 
 ---
 
@@ -341,11 +525,12 @@ The gold standard customer table (`HQ.MART_CUST.CURRENT_ASTRO_CUSTS`) — 140+ c
 - `IS_OVERAGE_RISK` — approaching credit limit
 
 **Health & Risk**
-- `ACCT_HEALTH` (Green/Yellow/Red), `SMOKE_SCORE`, `FIRE_SCORE`
-- `IS_CHURN_RISK`, `IS_DOWNGRADE_RISK`, `IS_EXPANSION_CANDIDATE`
+- `SMOKE_SCORE`, `FIRE_SCORE`
+- `IS_DOWNGRADE_RISK`, `IS_EXPANSION_CANDIDATE`
 - `P1_TICKET_COUNT`, `P2_TICKET_COUNT`, `P3_TICKET_COUNT`
 - `IS_CURRENT_CUST`, `IS_TRIAL`, `IS_POV`
 - `ACCT_TAGS` (array) — custom tags e.g. 'High Usage', 'Low Engagement'
+- ⚠️ `ACCT_HEALTH` and `IS_CHURN_RISK` are in `SF_ACCOUNTS`, **not** `CURRENT_ASTRO_CUSTS`
 
 **Tech Signals**
 - `HG_AIRFLOW`, `HG_DATABRICKS`, `HG_MWAA`, `HG_AZURE_DATA_FACTORY` (boolean — HG Insights flags)
@@ -501,4 +686,11 @@ Each entry captures a query pattern that was used successfully or a correction t
 - `MODEL_SNOWFLAKE.SNOWFLAKE_CURRENT_TABLES`: query this before running against unknown tables to get `TABLE_SIZE_GB` and declared `PRIMARY_KEY`/`FOREIGN_KEY` — free schema discovery.
 - Largest schemas: `IN_SPLUNK` (2.9TB), `IN_CHRONOSPHERE` (2.4TB) — engineering, not accessible. `MODEL_ASTRO` (743GB) — always date-filter. `SEGMENT_EVENTS_PROD.CLOUD_UI` (439 tables, 14GB) — raw events, use `MODEL_WEB.*` instead.
 - Hooks confirmed working: PreToolUse fired on all 5 parallel queries in this session.
+**2026-04-01 (optimization session)** — 5 improvements added to skill:
+- `ACCT_HEALTH` and `IS_CHURN_RISK` are NOT columns in `CURRENT_ASTRO_CUSTS` — query errored; both live in `SF_ACCOUNTS`. Fixed column reference section.
+- Account ID cache added for all 75 accounts in Joey's book of business (ORG_ID + METRONOME_ID verified from live query) — skip the ACCT_NAME CTE lookup for these accounts
+- Table selection decision tree added — covers all major question types with correct starting table
+- Common date range snippets added — last 7/30/90d, current/last month, current/last quarter, FY, trailing 12m
+- Data freshness/lag table added — covers all major sources with expected lag times; critical: Metronome billing 2-3 day lag, Gong 24h, Leadfeeder 48h, HG Insights weekly
+- PostToolUse hook updated: now also fires on successful queries with >1GB bytes scanned, prompting optimization review
 <!-- PATTERNS_LOG_END -->
