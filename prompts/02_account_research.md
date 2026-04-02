@@ -4,14 +4,15 @@ You are generating an AE brief for **{COMPANY_NAME}** ({DOMAIN}) as a prospectiv
 
 ## Instructions
 
-Using the RAW INTELLIGENCE block provided above, generate a structured account research summary. Every bullet point MUST be tagged with its verification status:
+Using all data provided, generate a structured account research summary. Every bullet point MUST be tagged with its verification status:
 
-- `(VERIFIED-EXA)` — Confirmed by Exa web research
-- `(VERIFIED-LF)` — Confirmed by Leadfeeder website visit data
-- `(VERIFIED-CR)` — Confirmed by Common Room community/contact data
-- `(VERIFIED-GONG)` — Confirmed by Gong call transcript data
-- `(VERIFIED-APOLLO)` — Confirmed by Apollo CRM email/contact data
+- `(VERIFIED-SF)` — Confirmed by first-party Salesforce CRM: SF_CONTACTS (activity, intent visits), SF_OPPS (deal history, discovery notes), SF_ACCOUNTS non-enriched fields (CRM status, owner, region, ICP designation, engagement scores)
+- `(VERIFIED-SF-LF)` — Confirmed by Leadfeeder data in Snowflake: LF_WEBSITE_VISITS / LF_PAGE_VIEWS
+- `(VERIFIED-GONG)` — Confirmed by Gong call transcripts (primary truth source)
+- `(VERIFIED-WEB)` — Confirmed by web search / WebFetch: job postings, news, engineering blog, GitHub (primary truth source)
 - `(GENERATED)` — Inferred or synthesized from available data (not directly confirmed)
+
+> **Source hierarchy**: Gong and web search are primary. Leadfeeder and first-party SF (contacts, opps, scores) are reliable. Tech stack, headcount, and hiring signals always come from web or Gong — not from SF.
 
 If a data source returned no results, explicitly note "No data available from [source]" in the relevant section.
 
@@ -22,216 +23,212 @@ If a data source returned no results, explicitly note "No data available from [s
 ```markdown
 ## Account Research: {COMPANY_NAME}
 
+### Airflow Mission Critical Assessment
+
+> **Grade tells the rep HOW to sell. A/B = lead with reliability/SLA urgency. C = lead with efficiency/DevEx. D = educate first.**
+
+**Grade**: [A / B / C / D] — [Real-Time Critical / Mission-Critical / Operational Tool / No Evidence]
+**Criticality**: [High / Medium / Low / None]
+
+**The Why**:
+[2-4 paragraphs: confirmed Airflow usage evidence, business model context (batch vs real-time), customer impact window if Airflow goes down, complementary stack, conclusion about Airflow's role in their operations]
+
+**Evidence**:
+1. **[Evidence type]**: [specific finding + verbatim quote where available] ([source tag])
+2. **[Evidence type]**: [specific finding] ([source tag])
+
+**Conclusion**: Airflow [is / is not] mission-critical to {COMPANY_NAME}. Pipeline failures would [immediately impact customers / delay deliverables and miss SLAs / inconvenience internal teams only], [with / without] direct revenue impact.
+
+---
+
 ### Email Brief
 
-> **This is the #1 section for AI email generation.** It distills the entire report into the most actionable outreach inputs. The email writer should start here, then reference other sections for supporting detail.
+> **This is the #1 section for AI email generation.** It distills the entire report into the most actionable outreach inputs.
 
-- **Outreach Type**: [WARM — prior Gong calls or Apollo replies exist | FOLLOW-UP — emails sent but no reply yet | COLD — no prior conversations or outreach] (VERIFIED-GONG / VERIFIED-APOLLO / GENERATED)
+- **Outreach Type**: [WARM — prior Gong calls or opp history | FOLLOW-UP — emails sent but no reply | COLD — no prior conversations] (VERIFIED-GONG / VERIFIED-SF / GENERATED)
 - **Urgency**: [HOT — reach out this week | WARM — reach out this month | COOL — add to nurture sequence] (GENERATED)
-- **Urgency Rationale**: [1 sentence explaining why — e.g., "Visited pricing page 3x in last 2 weeks + just raised Series B" or "No buying signals, general fit only"] (GENERATED)
+- **Urgency Rationale**: [1 sentence — e.g., "SF_CONTACTS shows pricing page visit 8 days ago + HG_AIRFLOW=true" or "No buying signals, general fit only"] (GENERATED)
 
-**Top 3 Personalization Hooks** (ranked by impact for email outreach):
-1. [Most compelling hook — e.g., a specific Gong conversation to follow up on, a pricing page visit, a case study quote, a job posting phrase] (source tag)
-2. [Second hook — e.g., a recent product launch that creates pipeline needs, an engineering blog post about their stack] (source tag)
-3. [Third hook — e.g., a new funding round, a hiring signal, a community question about Airflow] (source tag)
+**Top 3 Personalization Hooks** (ranked by impact):
+1. [Most compelling — e.g., a SF_CONTACTS pricing page visit, a Gong call to follow up on, a specific HG stack signal, a job posting phrase] (source tag)
+2. [Second hook — e.g., a recent product launch, SF_OPPS Airflow experience from prior discovery, engineering blog post] (source tag)
+3. [Third hook — e.g., hiring signal, funding round, community question] (source tag)
 
-**If prior Gong calls exist**:
-- **Last Call**: [date] with [their participant names/titles] and [Astronomer participant] (VERIFIED-GONG)
-- **Call Outcome**: [1 sentence — what was discussed, where it left off, any follow-ups promised] (VERIFIED-GONG)
+**If prior Gong calls or SF_OPPS history exists**:
+- **Last Call / Opp**: [date] with [participants/titles] (VERIFIED-GONG / VERIFIED-SF)
+- **Outcome**: [1 sentence — what was discussed, where it left off, any follow-ups promised, loss reason if closed-lost] (VERIFIED-GONG / VERIFIED-SF)
 - **Email Angle**: [1 sentence — how to reference the prior conversation naturally] (GENERATED)
 
-**If no prior calls**:
-- **Cold Outreach Angle**: [1 sentence — the single strongest reason to reach out, framed as a question or observation] (GENERATED)
+**If no prior calls or opps**:
+- **Cold Outreach Angle**: [1 sentence — the single strongest reason to reach out, grounded in the data] (GENERATED)
 
 ### Company Overview
-- **Description**: [1-2 sentence company description] (VERIFIED-EXA)
-- **Founded**: [year] (VERIFIED-EXA)
-- **Headquarters**: [location] (VERIFIED-EXA)
-- **Employees**: [count or range] (VERIFIED-EXA) / (VERIFIED-CR)
-- **Industry**: [industry] (VERIFIED-EXA)
-- **Funding**: [total raised, last round, valuation if known] (VERIFIED-EXA)
-- **Revenue**: [estimate if available] (VERIFIED-EXA) / (VERIFIED-CR)
+- **Description**: [1-2 sentence description] (VERIFIED-WEB)
+- **Founded**: [year] (VERIFIED-WEB)
+- **Headquarters**: [location] (VERIFIED-SF / VERIFIED-WEB)
+- **Employees**: [count from web — company website, LinkedIn, Crunchbase] (VERIFIED-WEB)
+- **Industry**: [industry / sub-industry] (VERIFIED-SF)
+- **Funding / Revenue**: [total raised, last round, or revenue estimate] (VERIFIED-WEB)
+- **CRM Status**: [Prospect / Customer since {date} / Churned / Closed-lost] (VERIFIED-SF)
+- **Astronomer Account Owner**: [{OWNER_NAME}, {SALES_REGION}] (VERIFIED-SF)
 
 ### Tech Stack
-- **Cloud Provider**: [AWS/GCP/Azure/multi-cloud] (source tag)
-- **Data Warehouse**: [Snowflake/BigQuery/Redshift/Databricks/etc.] (source tag)
-- **Orchestration**: [Current tool if known — Airflow, Prefect, Dagster, Step Functions, none identified] (source tag)
-- **Other Data Tools**: [dbt, Spark, Kafka, Fivetran, etc.] (source tag)
-- **CI/CD / DevOps**: [relevant tools] (source tag)
-- **Community Stack Signals**: [Any tools mentioned in GitHub repos, forum posts, or community activity] (VERIFIED-CR)
+- **Cloud Provider**: [AWS/GCP/Azure/multi-cloud — from JD or web] (VERIFIED-WEB / VERIFIED-GONG)
+- **Airflow / Orchestration**: [Confirmed from web: verbatim JD / GitHub / blog — or "Not confirmed via web" | If SF_OPPS discovery data exists: {CURRENT_AIRFLOW_DEPLOYMENT_MODEL}] (VERIFIED-WEB / VERIFIED-GONG)
+- **Current Airflow Deployment**: [{CURRENT_AIRFLOW_DEPLOYMENT_MODEL} | Versions: {CURRENT_AIRFLOW_VERSIONS} | Envs: {CURRENT_AIRFLOW_ENVIRONMENTS_COUNT}] (VERIFIED-SF — from discovery call)
+- **Data Warehouse**: [Confirmed from web — or "Not confirmed"] (VERIFIED-WEB / VERIFIED-GONG)
+- **Other Confirmed Tools**: [Tools confirmed by web or Gong only — with source and verbatim evidence] (VERIFIED-WEB / VERIFIED-GONG)
+- **Competition**: [{SF_OPPS.COMPETITION} from prior opp — if present] (VERIFIED-SF)
 
 ### Hiring Signals
-- **Data Engineering Roles**: [active postings mentioning pipelines, orchestration, Airflow, data platform] (VERIFIED-EXA)
-- **Platform Engineering Roles**: [active postings for infra/platform roles] (VERIFIED-EXA)
-- **Key Job Requirements**: [specific technologies or skills mentioned in postings] (VERIFIED-EXA)
-- **Hiring Velocity**: [growing/stable/shrinking based on available data] (VERIFIED-EXA)
+- **Active Job Postings**: [titles found + links] (VERIFIED-WEB)
+- **Key Requirements from JDs**: [specific tools, verbatim language — especially Airflow/orchestration mentions] (VERIFIED-WEB)
+- **Hiring Velocity**: [growing/stable/shrinking — from web] (VERIFIED-WEB)
 
 ### Data Challenges & Pain Points
-- [Inferred or confirmed challenges based on their stack, scale, and industry] (source tag)
-- [Community activity sentiment — are they asking questions about migration, scaling, reliability?] (VERIFIED-CR)
-- [Any public post-mortems, blog posts about data infrastructure challenges] (VERIFIED-EXA)
+- [Confirmed challenges from SF_OPPS discovery notes or Gong transcripts] (VERIFIED-SF / VERIFIED-GONG)
+- [Inferred from stack, scale, and industry] (GENERATED)
+- [From job posting language — verbatim: "reliability", "observability", "on-call"] (VERIFIED-WEB)
+- [From engineering blog posts about infrastructure challenges] (VERIFIED-WEB)
 
 ### Astronomer Alignment
 **Why Astronomer fits**:
-- [Bullet 1 — specific reason tied to their stack/needs] (source tag)
-- [Bullet 2 — specific reason tied to their scale/industry] (source tag)
-- [Bullet 3 — specific reason tied to buying signals] (source tag)
+- [Bullet 1 — tied to Gong discovery finding, web-confirmed stack signal, or Leadfeeder visit] (source tag)
+- [Bullet 2 — tied to their scale/industry] (source tag)
+- [Bullet 3 — tied to buying signals or prior opp] (source tag)
 
 **Potential objections**:
-- [Bullet 1 — why they might not buy] (source tag)
+- [Why they might not buy — loss reason from prior opp if available, otherwise inferred] (VERIFIED-SF / GENERATED)
 
-#### Website Engagement
+#### Website Engagement (astronomer.io visits)
 
-Combine visit data from both Leadfeeder and Common Room into a single view. This section is high-value for outreach — knowing what pages they looked at tells us what they care about.
+> Combine Salesforce-matched Leadfeeder data (SF: LF_WEBSITE_VISITS) and person-level contact visits (SF: SF_CONTACTS).
 
-**Leadfeeder (astronomer.io visits)**:
-- **Total Visits**: [count in last 6 months] (VERIFIED-LF)
-- **Most Recent Visit**: [date] (VERIFIED-LF)
-- **Visit Frequency**: [pattern — weekly/monthly/one-time] (VERIFIED-LF)
-- **Top Pages Visited** (ranked by visit count, most visited first):
+**IP-level visits (LF_WEBSITE_VISITS — company matched via Salesforce):**
+- **Total visits (last 6mo)**: [count] (VERIFIED-SF-LF)
+- **Most recent**: [date] (VERIFIED-SF-LF)
+- **Top pages visited** (ranked by recency/frequency):
 
-| Page | Visits | Most Recent | Signal Strength |
-|------|--------|-------------|-----------------|
-| [URL or page name, e.g., /pricing, /docs/astro, /blog/migrate-airflow] | [count] | [date] | [HIGH/MEDIUM/LOW — pricing/demo=HIGH, docs=MEDIUM, blog/homepage=LOW] |
+| Page | Date | Duration | Signal |
+|------|------|----------|--------|
+| [URL or page name] | [date] | [sec] | [HIGH=/pricing,/demo,/trial | MED=/docs,/astro | LOW=/blog,homepage] |
 
-> Classify each page: pricing, demo request, or trial pages = **HIGH** signal (active buying intent). Documentation, guides, or migration pages = **MEDIUM** signal (evaluating/learning). Blog posts, homepage, or about pages = **LOW** signal (awareness only).
-> If no Leadfeeder data: "No Leadfeeder visit data found for {COMPANY_NAME} in the last 6 months."
+**Person-level visits (SF_CONTACTS — named individuals):**
+| Contact Title | Pricing Page | Airflow Debug Page | DAG Debug Page | MQL Date |
+|---|---|---|---|---|
+| [title] | [date or —] | [date or —] | [date or —] | [date or —] |
 
-**Common Room (community web visits)**:
-- **Total Visits**: [count in last 90 days] (VERIFIED-CR)
-- **Top Pages Visited** (ranked by visit count, most visited first):
+> Flag any contact with a pricing page visit in the last 30 days as **HIGH urgency**.
 
-| Page | Visits | Most Recent |
-|------|--------|-------------|
-| [URL] | [count] | [date] |
+> If no LF or contact visit data: "No astronomer.io visit data found — cold outreach."
 
-> If no Common Room data: "No Common Room visit data found for {COMPANY_NAME}."
+**Visit Summary for Outreach**: [1-2 sentences synthesizing visit data into an actionable insight. Example: "Two contacts visited Airflow debugging docs last month and one hit the pricing page — looks like active evaluation."] (GENERATED)
 
-**Visit Summary for Outreach**: [1-2 sentences synthesizing the visit data into an actionable insight for an SDR/AE. Example: "They've visited the pricing page 3 times in the last month and read 2 migration guides — this looks like active evaluation, not just browsing." Or: "Single homepage visit only — awareness-level interest." If no visit data from either source: "No website engagement detected — cold outreach required."] (GENERATED)
+#### Key Contacts (Salesforce)
 
-#### Key Contacts (Common Room)
-| Name | Title | Email | Engagement |
-|------|-------|-------|------------|
-| [name] | [title] | [email] | [recent activity summary] |
+> From SF_CONTACTS — prioritized by title relevance then recency.
 
-> List up to 5 contacts from Common Room, prioritized by: (1) title relevance (VP Eng, Head of Data, Data Platform Lead), (2) engagement recency, (3) has email address.
-> If no Common Room data: "No community contacts found for {COMPANY_NAME}."
+| Title | Lead Score | Last Activity | Pricing Visit | Opted Out | SF URL |
+|-------|-----------|---------------|---------------|-----------|--------|
+| [title] | [grade] | [date] | [date or —] | [yes/no] | [link] |
 
-#### Prior Conversations (Gong)
+> Tier contacts: HIGH = VP/Director Eng, Head/Director of Data, Data Platform Lead, Staff/Principal Data Eng. MED = Data Eng, Analytics Eng, Data Scientist. LOW = non-technical roles.
+> If no SF_CONTACTS: "No contacts found in Salesforce for this account."
 
-> If calls found, list each call. If not, note it's cold outreach.
+#### Prior Conversations (Gong + SF_OPPS)
 
-| Date | Their Participants | Astronomer Participants | Summary |
-|------|-------------------|------------------------|---------|
-| [date] | [names + titles] | [names] | [2-3 sentence summary: topics, pain points, objections, outcome] |
+**Opportunity History (SF_OPPS)**:
 
-- **Relationship Status**: [Active opportunity / Stalled / Closed-lost / Churned / Never engaged] (VERIFIED-GONG)
-- **Key Pain Points from Calls**: [bullet list of specific pain points they mentioned] (VERIFIED-GONG)
-- **Objections Raised**: [any concerns or pushback they expressed] (VERIFIED-GONG)
-- **Tech Stack from Calls**: [specific tools, platforms, cloud providers, data warehouses, orchestration tools mentioned — tag each with the call date] (VERIFIED-GONG)
-- **Decision Makers Identified**: [names + titles of people with buying authority from the calls] (VERIFIED-GONG)
-- **Open Follow-Ups**: [any commitments or next steps that were promised but may not have happened] (VERIFIED-GONG)
+| Opp Name | Stage | Won/Lost | ACV | Created | Close | Loss Reason |
+|---|---|---|---|---|---|---|
+| [name] | [stage] | [W/L/Open] | [$] | [date] | [date] | [reason] |
 
-> If no Gong calls: "No prior Astronomer conversations found for {COMPANY_NAME}. This is a cold outreach."
+- **Airflow Experience (from discovery)**: [{AIRFLOW_EXPERIENCE}] (VERIFIED-SF)
+- **Airflow Deployment Model**: [{CURRENT_AIRFLOW_DEPLOYMENT_MODEL}] (VERIFIED-SF)
+- **Competition in deal**: [{COMPETITION}] (VERIFIED-SF)
+- **Cloud provider confirmed**: [{CLOUD_PROVIDER}] (VERIFIED-SF)
+
+**Gong Calls**:
+
+| Date | Their Participants | Astronomer | Summary |
+|------|-------------------|------------|---------|
+| [date] | [names + titles] | [names] | [2-3 sentences: topics, pain points, outcome] |
+
+- **Relationship Status**: [Active opp / Stalled / Closed-lost / Churned / Never engaged] (VERIFIED-GONG / VERIFIED-SF)
+- **Key Pain Points from Calls**: [exact quotes where possible] (VERIFIED-GONG)
+- **Objections Raised**: [what they pushed back on] (VERIFIED-GONG)
+- **Decision Makers Identified**: [names + titles] (VERIFIED-GONG / VERIFIED-SF)
+- **Open Follow-Ups**: [commitments or next steps promised] (VERIFIED-GONG)
+- **Tech Stack from Calls**: [tools mentioned — tag with call date] (VERIFIED-GONG)
+
+> If no Gong calls and no SF_OPPS: "No prior Astronomer conversations found. Cold outreach."
 
 #### Prior Email Replies (Apollo)
 
-> **CRITICAL FOR EMAIL GENERATION**: If someone at this company has replied to Astronomer outreach, the email writer MUST know what they said. Ignoring a prior reply is a dealbreaker.
-
 **Replies**:
-- **[Contact name]** ([title]) replied on [date]: "[full reply text]" (VERIFIED-APOLLO)
+- **[Contact name]** ([title]) replied on [date]: "[full reply text]" (VERIFIED-SF)
 
-**Reply Assessment**:
-- [1-2 sentences: Was the reply positive (interested, asking for more info), negative (not interested, wrong timing), or neutral (OOO, redirect to someone else)? Is there an open thread to continue?] (GENERATED)
+> If no replies: "No replies received from {COMPANY_NAME} contacts in Apollo."
 
-> If no replies found: "No replies received from {COMPANY_NAME} contacts in Apollo."
+### Intent & Engagement Signals (Snowflake)
+- **Acct Score**: {ACCT_SCORE} | Drivers: {ACCT_SCORE_POSITIVE_DRIVERS} / {ACCT_SCORE_NEGATIVE_DRIVERS} (VERIFIED-SF)
+- **Smoke Score**: {SMOKE_SCORE} | **Fire Score**: {FIRE_SCORE} (VERIFIED-SF)
+- **Last MQL**: {LAST_MQL_DATE} | **Cosmos doc**: {LAST_COSMOS_DOC_VIEW_DATE} | **DAG factory**: {LAST_DAG_FACTORY_DOWNLOAD_DATE} (VERIFIED-SF)
 
 ### Recent News & Events
-- [Date] — [Event/news item] (VERIFIED-EXA)
-- [Date] — [Event/news item] (VERIFIED-EXA)
+- [Date] — [Event/news item] (VERIFIED-WEB)
 
 ### Competitive Landscape
-- **Current Orchestration**: [what they use today, if known] (source tag)
-- **Competitive Risk**: [are they evaluating alternatives? Any signals from community activity?] (source tag)
+- **Current Orchestration**: [Airflow self-hosted / MWAA / Prefect / Dagster / none identified — source] (VERIFIED-SF / VERIFIED-GONG / VERIFIED-WEB)
+- **Prior Competitive Loss**: [{COMPETITION} from SF_OPPS — if present] (VERIFIED-SF)
+- **Competitive Risk**: [are they evaluating alternatives?] (VERIFIED-GONG / GENERATED)
 
 ### Outreach Context
 
-> **NOTE FOR AI EMAIL GENERATION**: This section provides *supplementary* detail for personalization. It does NOT replace the rest of the report. The email writer should reference the ENTIRE report — including Company Overview, Tech Stack, Hiring Signals, Data Challenges, Astronomer Alignment, Website Engagement, Key Contacts, News, Competitive Landscape, and How Astronomer Can Help — as source material for crafting emails. This section simply adds raw excerpts and quotes that are harder to find elsewhere.
-
-This section captures raw detail from public sources that an AI email writer can reference for personalization. Include only items that are relevant to data infrastructure, orchestration, or Astronomer's value prop.
-
 #### Engineering Blog & Tech Stack Insights
-> Extract key quotes or findings from the company's own engineering blog posts about their data infrastructure, pipeline challenges, architecture decisions, or tool choices. Include the blog post title, date, and URL for each. If nothing found, note "No engineering blog content found."
+- **[Blog Post Title]** ([date], [URL]) (VERIFIED-WEB)
+  - Key excerpt: "[relevant quote about their stack or challenges]"
+  - Tools mentioned: [specific technologies]
 
-- **[Blog Post Title]** ([date], [URL]) (VERIFIED-EXA)
-  - Key excerpt: "[relevant quote about their stack, challenges, or decisions]"
-  - Stack/tools mentioned: [specific technologies referenced]
-
-#### Product Announcements & Launches
-> Recent product announcements that imply new or growing data pipeline needs (e.g., new ML features, real-time capabilities, expanding into new verticals, scaling to new markets).
-
-- **[Announcement]** ([date]) (VERIFIED-EXA)
-  - Data implication: [1 sentence on why this creates orchestration/pipeline needs]
-
-#### Case Studies & Vendor References
-> Case studies by other vendors (Snowflake, Databricks, dbt Labs, AWS, etc.) featuring this company, or third-party blog posts that describe their tech stack in detail. These are high-value because vendors typically get stack details verified before publishing.
-
-- **[Case Study/Article Title]** by [vendor/author] ([URL]) (VERIFIED-EXA)
-  - Stack details revealed: [specific tools, architecture, data volumes, team size, etc.]
-  - Key quote: "[relevant excerpt]"
-
-> If no case studies found: "No vendor case studies or third-party stack references found for {COMPANY_NAME}."
+> If none: "No engineering blog content found."
 
 #### Job Posting Details
-> Specific requirements and language from their data engineering / platform engineering job postings. Include exact phrases that reveal pain points or priorities — an email writer can mirror this language.
+- **[Job Title]** ([URL]) (VERIFIED-WEB)
+  - Key requirements: [tools, responsibilities]
+  - Notable language: "[verbatim pain point language]"
 
-- **[Job Title]** ([URL]) (VERIFIED-EXA)
-  - Key requirements: [specific tools, experience, responsibilities listed]
-  - Notable language: "[exact phrases that reveal pain points, e.g., 'reduce pipeline failure rates', 'manage complex DAG dependencies', 'scale training data ingestion']"
-
-> If no relevant postings found: "No relevant data/platform job postings found for {COMPANY_NAME}."
+> If none: "No relevant data/platform job postings found."
 
 #### Company Self-Description
-> How the company describes itself and its mission from their website. Useful for connecting Astronomer's value to their own language and goals.
-
-- **Mission/tagline**: "[their own words]" (VERIFIED-EXA)
-- **Key products/services**: [what they sell, in their language] (VERIFIED-EXA)
-- **Target customers**: [who they serve] (VERIFIED-EXA)
+- **Mission/tagline**: "[their own words]" (VERIFIED-WEB)
+- **Key products/services**: [what they sell] (VERIFIED-WEB)
+- **Target customers**: [who they serve] (VERIFIED-WEB)
 
 ### Persona Talking Points (GENERATED)
 
-> Generate tailored talking points for the most likely outreach targets. Use titles from Common Room contacts, Gong call participants, or infer from the company's likely org structure. Only generate for personas where we have enough context to be specific — don't force generic points.
+> Only generate for personas where we have supporting evidence from SF_CONTACTS titles, Gong participants, or confirmed stack signals. Skip personas with no evidence.
 
-**For Engineering Leadership** (VP Eng, CTO, Head of Engineering):
-- [Talking point focused on: team velocity, reducing operational burden, reliability SLAs, build-vs-buy decisions] (GENERATED)
-- [Talking point connecting Astronomer to their business goals or recent strategic moves] (GENERATED)
+**For Engineering / Data Platform Leadership** (VP Eng, Head of Data, Data Platform Lead):
+- [Talking point: team velocity, reliability SLAs, build-vs-buy — tied to their specific stack or opp history] (GENERATED)
+- [Talking point connecting Astronomer to their business goals or stack signal] (GENERATED)
 
-**For Data/Platform Leadership** (Head of Data, Director of Data Platform, ML Platform Lead):
-- [Talking point focused on: pipeline reliability, scaling infrastructure, reducing maintenance toil, observability] (GENERATED)
-- [Talking point referencing their specific stack or a pain point from their job postings/blog] (GENERATED)
-
-**For Individual Contributors** (Senior Data Engineer, Staff Platform Engineer, MTS):
-- [Talking point focused on: developer experience, DAG authoring, testing, CI/CD for pipelines, open-source Airflow community] (GENERATED)
-- [Talking point referencing specific tools they use or technical challenges from job descriptions] (GENERATED)
-
-> Only include persona sections where relevant contacts or titles have been identified. Skip personas with no supporting evidence.
+**For Individual Contributors** (Senior Data Engineer, Staff Platform Engineer):
+- [Talking point: developer experience, DAG authoring, CI/CD for pipelines — reference their confirmed tools] (GENERATED)
 
 ### How Astronomer Can Help (GENERATED)
 
-Based on what we know about {COMPANY_NAME}'s business, tech stack, and growth trajectory, generate 2-4 specific, concrete use cases where Astronomer (managed Apache Airflow) would deliver value. Each use case should:
-- Be tied to a real business goal, pain point, or initiative identified in the research above
-- Explain what the Airflow pipeline/DAG would actually do (not just "orchestrate data")
-- Reference their specific tools (e.g., "orchestrate dbt transformations loading into their Snowflake warehouse" rather than generic "manage data pipelines")
-- Be written in a way that an AE or SDR could directly reference in outreach
+Based on confirmed signals from Snowflake and web research, generate 2-4 specific use cases where Astronomer delivers value. Each use case must:
+- Be tied to a real signal (HG_AIRFLOW, EVIDENCE_OF_AIRFLOW, a confirmed tool, a job posting phrase, opp history)
+- Explain what the Airflow DAG would actually do — reference their specific tools by name
+- Explain what pain it removes, tied to their business context
 
 Format:
-1. **[Use Case Name]**: [2-3 sentences describing the specific workflow Astronomer would orchestrate, why it matters for their business, and what pain it removes. Reference their actual stack and business context.]
+1. **[Use Case Name]**: [2-3 sentences — specific workflow, why it matters, what pain it removes]
 2. **[Use Case Name]**: [same format]
 
-Also include:
-- **Astronomer differentiator**: [1-2 sentences on why managed Airflow via Astronomer is better for them than self-hosting Airflow or using an alternative, based on their specific situation — e.g., team size, scale, cloud provider, compliance needs]
-- **Conversation starter**: [A single compelling question or observation an SDR could use to open a conversation, grounded in something specific from the research — a job posting, a tech choice, a recent announcement]
+- **Astronomer differentiator**: [1-2 sentences — why managed Airflow is better than self-hosting or their current tool, based on their specific situation]
+- **Conversation starter**: [One compelling question grounded in a specific signal — a stack confirmation, job posting phrase, pricing page visit, or prior opp finding]
 
 ### Summary & Recommended Next Steps
-[2-3 sentence summary for the AE: who the company is, why they're a fit, what the entry point is, and what action to take first.]
+[2-3 sentences for the AE: who the company is, why they're a fit (or not), what the entry point is, what to do first. If SF_CONTACTS shows a pricing page visit or there's an open opp, lead with that.]
 ```

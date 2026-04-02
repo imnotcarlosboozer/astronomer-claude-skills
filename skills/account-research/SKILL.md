@@ -1,926 +1,441 @@
 ---
 name: account-research
-description: Research a company for Astronomer sales fitness using Exa AI (or built-in web search), Leadfeeder, Common Room, and Gong. Generates a fit score and AE brief. Exa and Common Room are optional — the skill falls back gracefully without them. Use when the user asks to research an account, score a company, or run batch account research.
-version: 1.0.0
+description: Research a company for Astronomer sales fitness using Snowflake (SF_ACCOUNTS, SF_CONTACTS, SF_OPPS, LF_WEBSITE_VISITS, Gong transcripts), web search, and Apollo. Generates a fit score and AE brief. Snowflake is the primary intelligence source — web research fills gaps Snowflake can't answer.
+version: 2.0.0
 ---
 
 # Account Research Orchestrator
 
-Research companies for Astronomer (Apache Airflow) sales fitness using four data sources: Exa AI (public research), Leadfeeder (website visit intent), Common Room (community/contact intelligence), and Gong (prior call history).
+Research companies for Astronomer (Apache Airflow) sales fitness. Snowflake is the primary data source for CRM intelligence (contacts, buying signals, opp history, Leadfeeder visits, Gong transcripts, scores). Web research is the primary source for tech stack — HG Insights and DataFox signals in Salesforce are unreliable and must not be treated as verified. Always confirm stack via job postings, engineering blog, GitHub, and web search.
 
 ## Input
 The user has provided: {{args}}
 
 - Single company: `{COMPANY}, {DOMAIN}` (e.g., "Acme Corp, acme.com")
 - Batch mode: `batch: /path/to/file.csv` (CSV with columns: company_name, domain)
-- Batch force-rerun: `batch: /path/to/file.csv force` — re-researches all companies even if a complete report already exists (use after skill updates to refresh all reports)
+- Batch force-rerun: `batch: /path/to/file.csv force`
 
 ## Constants
-- **Leadfeeder Account ID**: `281783`
 - **Prompts Directory**: `~/claude-work/research-assistant/prompts/`
 - **Output Directory**: `~/claude-work/research-assistant/outputs/accounts/`
+- **Apollo Field ID**: `{YOUR_APOLLO_ACCOUNT_RESEARCH_FIELD_ID}`
 
 ---
 
 ## SINGLE COMPANY MODE
 
 ### Step 1: Parse Input
-Extract `COMPANY_NAME` and `DOMAIN`. If only a name is given, use web search to find the domain.
+Extract `COMPANY_NAME` and `DOMAIN`. Strip `http://`, `www.`, trailing slashes. If only a name is given, search for the domain first.
 
-### Step 2: Pre-flight Checks
+### Step 2: Snowflake Intelligence Dump
 
-Run before spawning agents:
+Run template check and Apollo key check in bash while simultaneously firing the first Snowflake query:
 
-**a) Gong pre-check** — query Snowflake directly (no local cache needed):
-```sql
-SELECT COUNT(*) AS call_count
-FROM HQ.MODEL_CRM_SENSITIVE.GONG_CALL_TRANSCRIPTS t
-JOIN HQ.MODEL_CRM_SENSITIVE.GONG_CALLS c ON t.CALL_ID = c.CALL_ID
-WHERE UPPER(t.ACCT_NAME) LIKE UPPER('%{COMPANY_NAME}%')
-  AND c.IS_DELETED = FALSE
-```
-Use `mcp__snowflake__execute_query` to run this. Store result as `GONG_CALL_COUNT`.
-- If `GONG_CALL_COUNT = 0`: set `GONG_HAS_CALLS=false` — skip Agent 3 entirely and record "No prior Gong calls found. Cold outreach."
-- If `GONG_CALL_COUNT > 0`: set `GONG_HAS_CALLS=true` and note whether `GONG_CALL_COUNT > 20` — Agent 3 will use a two-phase query for large accounts.
-
-**b) Prompt template check**:
 ```bash
 for f in ~/claude-work/research-assistant/prompts/01_fit_scoring.md \
           ~/claude-work/research-assistant/prompts/02_account_research.md; do
-  [ -f "$(eval echo $f)" ] \
-    && echo "TEMPLATE OK: $f" \
-    || { echo "TEMPLATE MISSING: $f — cannot generate report. Aborting."; exit 1; }
+  [ -f "$(eval echo $f)" ] || { echo "TEMPLATE MISSING: $f — aborting."; exit 1; }
 done
-```
-If either file is missing, stop immediately. Do not proceed — the report will be incomplete without the scoring rubric and AE brief template.
-
-**c) Apollo key check**:
-```bash
-[ -n "$APOLLO_API_KEY" ] && echo "APOLLO: key set" || echo "APOLLO: no key — will skip Step 8"
+echo "TEMPLATES OK"
+[ -n "$APOLLO_API_KEY" ] && echo "APOLLO: key set" || echo "APOLLO: no key"
 ```
 
-**d) Leadfeeder cache check**:
-```bash
-python3 -c "
-import json, os, time
-cache = os.path.expanduser('~/claude-work/leadfeeder-cache/leads.json')
-if os.path.exists(cache):
-    age_hours = (time.time() - os.path.getmtime(cache)) / 3600
-    if age_hours < 168:  # 7-day TTL
-        data = json.load(open(cache))
-        print(f'LEADFEEDER_CACHE_HIT: {len(data)} leads, {age_hours:.1f}h old ({age_hours/24:.1f} days)')
-        exit(0)
-print('LEADFEEDER_CACHE_MISS')
-"
+**Query A — Account profile** (run immediately, domain match):
+```sql
+SELECT
+  a.ACCT_ID, a.ACCT_NAME, a.ACCT_DOMAIN, a.ACCT_TYPE, a.ACCT_STATUS,
+  a.IS_CURRENT_CUST, a.IS_CHURNED_CUST, a.CUSTOMER_SINCE_DATE,
+  a.INDUSTRY, a.OWNER_NAME, a.SALES_REGION, a.SEGMENT_PLANNED,
+  a.ICP_DESIGNATION_V2, a.ACCT_SCORE, a.ACCT_SCORE_POSITIVE_DRIVERS,
+  a.ACCT_SCORE_NEGATIVE_DRIVERS, a.SMOKE_SCORE, a.FIRE_SCORE,
+  a.LAST_MQL_DATE, a.LAST_COSMOS_DOC_VIEW_DATE, a.LAST_DAG_FACTORY_DOWNLOAD_DATE,
+  a.BILLING_COUNTRY, a.SHIPPING_COUNTRY
+FROM HQ.MODEL_CRM.SF_ACCOUNTS a
+WHERE LOWER(a.ACCT_DOMAIN) LIKE LOWER('%{DOMAIN}%')
+  AND a.ACCT_TYPE NOT IN ('Internal', 'Competitor')
+ORDER BY a.IS_CURRENT_CUST DESC, a.ACCT_SCORE DESC NULLS LAST
+LIMIT 5
 ```
-Store result as `LEADFEEDER_CACHE_STATUS`. If `CACHE_HIT`, load `~/claude-work/leadfeeder-cache/leads.json` into memory as `LEADFEEDER_LEADS` — Agent 2 will use these directly and skip all pagination. If `CACHE_MISS`, Agent 2 will paginate and populate the cache after.
 
-**e) Apollo account + intent pre-fetch** (skip if no `APOLLO_API_KEY`):
+Store: `SF_ACCT_ID`, `SF_ACCOUNT_FOUND` (true/false), all signal fields.
 
-Search Apollo for the account by domain now, so intent signals are available during report assembly (not just at Step 8 sync time):
+**After Query A resolves**, extract `SF_ACCT_ID` and fire Queries B–E in parallel:
+
+**Query B — Contacts with person-level intent signals:**
+```sql
+SELECT
+  c.TITLE, c.LEAD_SCORE_GRADE, c.CONTACT_STATUS,
+  c.LAST_VISITED_PRICING_PAGE_DATE,
+  c.LAST_VISITED_DEBUGGING_AIRFLOW_PAGE_DATE,
+  c.LAST_VISITED_DEBUGGING_DAGS_PAGE_DATE,
+  c.LAST_MQL_DATE, c.IS_OPTED_OUT_OF_EMAIL, c.CONTACT_URL,
+  c.LAST_ACTIVITY_TS
+FROM HQ.MODEL_CRM.SF_CONTACTS c
+WHERE c.ACCT_ID = '{SF_ACCT_ID}'
+  AND c.IS_DELETED = FALSE
+ORDER BY c.LAST_ACTIVITY_TS DESC NULLS LAST
+LIMIT 20
+```
+If `SF_ACCOUNT_FOUND=false`: skip, record "No Salesforce account found — contact intelligence unavailable."
+
+**Query C — Leadfeeder website visits** (replaces entire Leadfeeder MCP):
+```sql
+SELECT
+  v.VISIT_TS, v.LANDING_PAGE, v.PAGE_VIEW_COUNT,
+  v.VISIT_DURATION, v.SOURCE, v.MEDIUM, v.CAMPAIGN_NAME,
+  p.PAGE_URL, p.PAGE_NAME, p.PAGEVIEW_TS
+FROM HQ.MODEL_CRM.LF_WEBSITE_VISITS v
+JOIN HQ.MODEL_CRM.LF_PAGE_VIEWS p ON v.LF_VISIT_ID = p.LF_VISIT_ID
+WHERE v.SF_ACCT_ID = '{SF_ACCT_ID}'
+  AND v.VISIT_TS >= DATEADD(month, -6, CURRENT_DATE)
+ORDER BY v.VISIT_TS DESC
+LIMIT 200
+```
+If `SF_ACCOUNT_FOUND=false`: skip, record "No Leadfeeder data — account not in Salesforce."
+
+**Query D — Opportunity history** (Airflow experience, competition, loss reasons):
+```sql
+SELECT
+  o.OPP_NAME, o.CURRENT_STAGE_NAME, o.IS_WON, o.IS_LOST,
+  o.LOSS_REASON, o.LOSS_DETAILS, o.COMPETITION, o.CLOUD_PROVIDER,
+  o.AIRFLOW_COMMITMENT, o.AIRFLOW_EXPERIENCE,
+  o.CURRENT_AIRFLOW_DEPLOYMENT_MODEL, o.CURRENT_AIRFLOW_VERSIONS,
+  o.CURRENT_AIRFLOW_ENVIRONMENTS_COUNT, o.AIRFLOW_EXPERIENCE,
+  o.CREATED_DATE, o.WON_DATE, o.LOST_DATE, o.TOTAL_ACV, o.NEW_BUSINESS_ACV,
+  o.LEAD_SOURCE, o.DISCOVERY_MEETING_DATE
+FROM HQ.MODEL_CRM.SF_OPPS o
+WHERE o.ACCT_ID = '{SF_ACCT_ID}'
+ORDER BY o.CREATED_DATE DESC
+LIMIT 15
+```
+If `SF_ACCOUNT_FOUND=false`: skip, record "No opportunity history."
+
+**Query E — Gong calls + transcripts:**
+```sql
+SELECT
+  t.CALL_ID, t.CALL_TITLE, t.CALL_URL, t.SCHEDULED_TS,
+  t.ACCT_NAME, t.OPP_NAME, c.OPP_STAGE_AT_CALL, c.CALL_DURATION,
+  t.CALL_BRIEF, t.CALL_NEXT_STEPS, t.ATTENDEES,
+  c.PRIMARY_EMPLOYEE, t.FULL_TRANSCRIPT
+FROM HQ.MODEL_CRM_SENSITIVE.GONG_CALL_TRANSCRIPTS t
+JOIN HQ.MODEL_CRM_SENSITIVE.GONG_CALLS c ON t.CALL_ID = c.CALL_ID
+WHERE UPPER(t.ACCT_NAME) LIKE UPPER('%{COMPANY_NAME}%')
+  AND c.IS_DELETED = FALSE
+ORDER BY t.SCHEDULED_TS DESC
+```
+If count > 20: fetch metadata first (without `FULL_TRANSCRIPT`), then fetch transcripts in parallel batches of 10 CALL_IDs. If no results, try first word of company name or known abbreviations.
+
+**Apollo pre-fetch** (parallel with B–E, skip if no key):
 ```bash
-curl -s -X POST "https://api.apollo.io/v1/accounts/search" \
+source ~/.zshrc && curl -s -X POST "https://api.apollo.io/v1/accounts/search" \
   -H "Content-Type: application/json" \
-  -d "{\"api_key\": \"$APOLLO_API_KEY\", \"q_organization_name\": \"{COMPANY_NAME}\", \"per_page\": 10}"
-```
-Filter results by `domain == "{DOMAIN}"`. If found:
-- Store `APOLLO_ACCOUNT_ID` for use in Step 8 (skip the search there)
-- Extract `intent_signal_account.website_visitor_metrics` if present — store as `APOLLO_INTENT_DATA`
-- Extract `intent_signal_account.domain_aggregates[].top_5_paths` — these are the actual pages visited on astronomer.io, ranked by visit count. Store as `APOLLO_TOP_PAGES`
-- Extract `last_activity_date`, `organization_headcount_*_growth` fields
-
-If no domain match found: set `APOLLO_ACCOUNT_ID=null`. Log: "Apollo: no account found for {DOMAIN} — will attempt lookup again at Step 8."
-
-### Step 3: Collect Data (3 Parallel Agents)
-
-Launch all three agents simultaneously using the Agent tool with subagent_type="general-purpose":
-
-#### Agent 1: Public Research (Claude WebSearch + WebFetch as primary; Exa optional)
-
-Use Claude's built-in **WebSearch** and **WebFetch** tools for all queries. If `mcp__exa__*` tools are also available, they can supplement but are not required. Never wait for Exa if WebSearch is already returning results.
-
-**Execute in two batches to maximize parallelism:**
-
-**Batch A — fire ALL of the following simultaneously (no dependencies between them):**
-
-1. **Company Research** — two parallel calls:
-
-   a) **Crunchbase fetch** — derive the slug from the domain (e.g., `bridgebio.com` → `bridge-bio`, `writer.com` → `writer`). Fetch:
-   ```
-   WebFetch("https://www.crunchbase.com/organization/{slug}")
-   ```
-   If the slug is uncertain, first run `WebSearch('"{COMPANY_NAME}" site:crunchbase.com/organization', numResults=1)` to find the exact URL, then fetch it.
-
-   b) **General company search**:
-   ```
-   WebSearch('"{COMPANY_NAME}" company overview employees revenue funding 2025 2026')
-   ```
-
-   Extract from both: employee count + growth rate, revenue/funding stage (round + amount + date), industry vertical, business model (is the core product data-intensive?), any tech stack signals, how they describe themselves around data/AI.
-
-2. **Orchestration/Pipeline Evidence** — two parallel searches:
-   ```
-   WebSearch('"{COMPANY_NAME}" "Apache Airflow" OR "Airflow DAG" OR "data orchestration" OR "dagster" OR "prefect"')
-   WebSearch('"{COMPANY_NAME}" data pipeline orchestration airflow dagster prefect after:2025-03-09')
-   ```
-
-   Extract from each result: named orchestration tool (Airflow = existing user; Dagster/Prefect = competitor; Luigi/Argo/Kubeflow/custom = opportunity); data volume/scale (copy exact phrases); pipeline frequency (batch/streaming/real-time); migration stories ("moved from X to Y"); architecture signals (data mesh, lakehouse, microservices). Tag every finding with source URL and date.
-
-3a. **Hiring Signals — job posting discovery** — three parallel searches, all in Batch A:
-
-   **Title search** — broad role coverage on major job boards:
-   ```
-   WebSearch('"{COMPANY_NAME}" site:greenhouse.io OR site:lever.co OR site:ashbyhq.com ("data engineer" OR "data platform" OR "platform engineer" OR "ML engineer" OR "MLOps" OR "analytics engineer" OR "data architect" OR "data infrastructure" OR "data operations" OR "data reliability")')
-   ```
-
-   **Tool search** — orchestration mentions regardless of job title:
-   ```
-   WebSearch('"{COMPANY_NAME}" site:greenhouse.io OR site:lever.co OR site:ashbyhq.com ("Apache Airflow" OR "Airflow DAG" OR dagster OR prefect OR "data orchestration" OR "workflow orchestration")')
-   ```
-   This catches Airflow requirements embedded in ML Engineer, DevOps, Backend, or Staff Engineer roles that a title-only search would miss.
-
-   **LinkedIn search** — catches postings not on Greenhouse/Lever/Ashby (many mid-market and non-US companies post exclusively here):
-   ```
-   WebSearch('site:linkedin.com/jobs "{COMPANY_NAME}" ("data engineer" OR "data platform" OR "MLOps" OR "Apache Airflow" OR "data infrastructure")')
-   ```
-
-   If all three return fewer than 2 combined results, also include in Batch A:
-   ```
-   WebSearch('site:{DOMAIN} ("data engineer" OR "data platform" OR "platform engineer" OR "ML engineer" OR "MLOps" OR "analytics engineer" OR "data architect" OR "data infrastructure")')
-   ```
-
-4. **Recent News** — two parallel searches:
-
-   **General news**:
-   ```
-   WebSearch('"{COMPANY_NAME}" (funding OR acquisition OR "Series" OR layoff OR "new CTO" OR "Chief Data Officer") after:2025-03-09')
-   ```
-
-   **M&A / corporate events** (look back to 2023 — these events affect outreach for years):
-   ```
-   WebSearch('"{COMPANY_NAME}" (acquired OR "acquisition of" OR "acquired by" OR "merger with" OR "merged with" OR "went public" OR IPO OR SPAC OR "filed for bankruptcy" OR "chapter 11" OR "shutting down" OR "wind down" OR "ceasing operations")')
-   ```
-
-   From the general news search, extract by type: **funding rounds** (stage + amount + stated use of funds — "investing in data infrastructure" is direct signal); **leadership hires** (new VP Eng or Chief Data Officer = new buying motion); **layoffs/restructuring** (cost-cutting mode = harder sell); **product launches** (new AI/data product = more pipeline complexity); **partnerships** (cloud provider partnerships reveal stack). Tag each with source URL and date.
-
-   From the M&A search, determine **M&A STATUS** — one of:
-   - **ACQUIRED**: company was bought by another; note acquirer + date + any stated rationale
-   - **MERGER**: merged with another entity; note merged entity + date
-   - **IPO**: went public; note exchange + date
-   - **BANKRUPTCY/SHUTDOWN**: filed for bankruptcy or ceased operations; note date
-   - **NONE FOUND**: no M&A events found
-
-   If M&A status is anything other than NONE FOUND: this is the most important finding in the report. It affects who to contact, whether budget exists, and whether the stack will be consolidated. Flag it prominently.
-
-5. **Website Crawl**:
-   ```
-   WebFetch(url="https://{DOMAIN}", maxCharacters=2000)
-   ```
-
-   Extract: exact language they use to describe themselves around data/scale/automation; customer segments named (enterprise, SMB, regulated industries); any explicit tool or cloud partner mentions; data-intensity signals (copy verbatim: "real-time", "AI-powered", "processes X transactions"); scale claims ("serving 500 enterprise customers"); whether an Engineering or Platform section exists in the nav.
-
-6. **Engineering & Data Blog Posts — discovery**:
-   ```
-   WebSearch('"{COMPANY_NAME}" (engineering blog OR "data infrastructure" OR "data platform" OR "pipeline") after:2024-09-09')
-   ```
-
-   Note the top 2-3 blog post URLs from the results — they will be fetched in full in Batch B. Do not extract from snippets alone.
-
-7. **Product Announcements**:
-   ```
-   WebSearch('"{COMPANY_NAME}" ("product launch" OR "we launched" OR "now available" OR "announcing") after:2025-03-09')
-   ```
-
-   Extract: what launched; whether it increases data pipeline complexity (new AI feature, real-time capability, new data product = stronger fit signal). Tag with source URL and date.
-
-8. **Case Studies & Third-Party Mentions**:
-   ```
-   WebSearch('"{COMPANY_NAME}" (Snowflake OR Databricks OR dbt OR AWS OR "Google Cloud" OR Azure) (case study OR customer OR partner)')
-   ```
-
-   For each case study found, extract: which vendor published it (confirms they are a customer of that tool); every tool/vendor named in the study; use case described (batch ETL / real-time / ML pipelines / etc.); scale numbers if present; exact business problem language (maps directly to Astronomer use cases). Tag with source URL.
-
-9. **Tech Stack — StackShare**:
-   ```
-   WebSearch('"{COMPANY_NAME}" site:stackshare.io')
-   ```
-   If a StackShare profile URL is returned, fetch it:
-   ```
-   WebFetch(that URL, maxCharacters=3000)
-   ```
-   Extract: every tool listed, especially Airflow, Spark, dbt, Snowflake, Databricks, Kafka, Flink. If no StackShare profile found, record "No StackShare profile found."
-
-10. **GitHub Org Search**:
-   ```
-   WebSearch('site:github.com "{COMPANY_NAME}" (airflow OR dbt OR dagster OR prefect OR "data pipeline")')
-   ```
-   If a company GitHub org URL is returned (e.g., `github.com/company-name`), fetch it (`maxCharacters=3000`). Extract: public repos confirming Airflow DAGs, dbt projects, data engineering tooling, or infrastructure-as-code. A public `airflow-dags`, `data-platform`, or similar repo is the strongest possible tech stack confirmation — treat it as equivalent to a job posting mentioning Airflow. If no GitHub org found, record "No public GitHub org found."
-
-11. **Conference & Community Speaker Signals** — two parallel searches:
-   ```
-   WebSearch('"{COMPANY_NAME}" (site:airflowsummit.org OR "dbt Coalesce" OR "Data Council" OR "Spark+AI Summit" OR "DataEngConf" OR "PyData")')
-   WebSearch('"{COMPANY_NAME}" employee speaker (airflow OR dbt OR spark OR kafka OR "data pipeline") (conference OR summit OR meetup) after:2024-01-01')
-   ```
-   Extract: speaker name + title; conference name; talk title; tools mentioned; date. A current employee speaking at Airflow Summit or dbt Coalesce is extremely high-confidence stack confirmation — treat as equivalent to a confirmed Airflow mention in a job posting. If nothing found, record "No conference speaker signals found."
-
-**Batch B — fire after Batch A completes (depends on 3a and 6 results):**
-
-3b. **Job Posting Crawls**: From the URLs returned by search 3a, WebFetch up to 4 postings (maxCharacters=5000 each). Prioritize: (1) any role from the tool search that mentions Airflow/Dagster/Prefect directly, (2) data platform / ML platform / MLOps roles, (3) data engineer / analytics engineer / data architect roles. Do not limit to "data engineer" and "platform engineer" titles — any role mentioning orchestration tools is worth crawling regardless of title.
-
-   From each posting extract:
-   - **Named tools** — Airflow, Dagster, Prefect, Spark, dbt, Snowflake, Databricks, Kafka, Flink, MLflow, Kubeflow (Airflow = highest signal)
-   - **Scale language** — copy verbatim ("managing hundreds of DAGs", "processing 10M events/day")
-   - **Orchestration explicitly mentioned** — quote the exact phrase if present
-   - **Build vs. maintain framing** — "build our data platform from scratch" = greenfield; "maintain and scale existing pipelines" = rip-and-replace candidate
-   - **Cloud platform** — AWS/GCP/Azure (affects Astro positioning)
-   - **Pain point language** — verbatim: "reliability", "observability", "SLA", "on-call", "data quality"
-   - **Team name** — Data Platform / ML Infrastructure / Data Engineering / MLOps / etc.
-   - **Seniority** — Staff/Principal/Director = mature org; entry-level = early stage
-   - **Role type** — note if this is a non-traditional role (e.g. ML Engineer, DevOps) that reveals orchestration need
-
-   If 3a returned no relevant posting URLs, run this fallback search instead:
-   ```
-   WebSearch('"{COMPANY_NAME}" hiring ("data engineer" OR "ML engineer" OR "MLOps" OR "analytics engineer" OR "data architect" OR "platform engineer" OR "data operations") after:2025-09-09')
-   ```
-
-6b. **Engineering Blog Fetches**: WebFetch the top 1-2 blog post URLs identified in search 6 (maxCharacters=5000 each).
-
-   Extract from full post text: specific tools named (exact names); scale/volume metrics; architecture decisions verbatim ("we chose X because Y"); pain points described; post date. If no blog post URLs were found in search 6, record "No public engineering blog found — signals lower data platform maturity."
-
-#### Agent 2: Internal Signals (Leadfeeder + Common Room)
-
-Launch **Leadfeeder and Common Room simultaneously** — two parallel tool calls.
-
----
-
-**Leadfeeder** — use cache if available, otherwise paginate:
-
-If `LEADFEEDER_CACHE_HIT` from pre-flight: search `LEADFEEDER_LEADS` in memory for a record where `name` or `website` matches `{COMPANY_NAME}` or `{DOMAIN}`. If found, set `MATCHED_LEAD_ID` and call:
-```
-mcp__leadfeeder__get_lead_visits({YOUR_LEADFEEDER_ACCOUNT_ID}, lead_id=MATCHED_LEAD_ID, start_date=[6mo ago], end_date=[today])
-```
-
-If `LEADFEEDER_CACHE_MISS`: paginate up to 5 pages to find a match:
-```
-mcp__leadfeeder__get_leads({YOUR_LEADFEEDER_ACCOUNT_ID}, start_date=[6mo ago], end_date=[today], page_size=100, page=1)
-```
-Match by name or domain. If found, call `get_lead` and `get_lead_visits`. Then save all fetched leads to cache so future runs are instant:
-```bash
-mkdir -p ~/claude-work/leadfeeder-cache/
-python3 -c "
-import json, os
-leads = [...]  # list of {id, name, website, visit_count, last_visited_at} dicts collected above
-with open(os.path.expanduser('~/claude-work/leadfeeder-cache/leads.json'), 'w') as f:
-    json.dump(leads, f)
-print(f'Cached {len(leads)} leads')
+  -d "{\"api_key\": \"$APOLLO_API_KEY\", \"q_organization_name\": \"{COMPANY_NAME}\", \"per_page\": 10}" \
+  | python3 -c "
+import json, sys
+data = json.load(sys.stdin)
+for a in data.get('accounts', []):
+    if '{DOMAIN}'.lower() in (a.get('domain') or '').lower():
+        print(f'APOLLO_ID={a[\"id\"]}')
+        break
+else:
+    print('APOLLO_ID=null')
 "
 ```
 
-Keep only: `lead_id`, `name`, `website`, `visit_count`, `last_visited_at`, and per-visit `url`/`date`/`duration`.
+### Step 3: Pre-qualification Gate
 
----
+After all Snowflake queries complete, determine research depth. Default is `RESEARCH_DEPTH=FULL`.
 
-**Common Room** (if connected) — run in parallel with Leadfeeder and Gong:
+Set `RESEARCH_DEPTH=ABBREVIATED` only if ALL of the following are true:
+- Query D returned no opportunities
+- Query E returned no Gong calls
+- No SF_CONTACTS have pricing/Airflow debugging page visits
+- `ACCT_SCORE < 40` or account not found in Salesforce
 
-**Step 1 — Org lookup** (required first, everything else depends on this):
-```
-mcp__commonroom__commonroom_list_objects(
-  objectType="Organization",
-  filter={type:"and", clauses:[{type:"stringFilter", field:"companyWebsite", params:{op:"like", value:"{DOMAIN}"}}]},
-  properties=["about","employees","location","subIndustry","revenueRangeMin","revenueRangeMax","leadScores","topContacts","contactsCount","tags","researchResults"],
-  limit=1
-)
-```
+**ABBREVIATED mode**: Run only items 1, 2, 3 from Step 4 (job postings, news, orchestration evidence). Skip items 4–7. Accounts with any prior engagement signal (opps, calls, contact visits, score) always get FULL research.
 
-**Step 2 — After org lookup resolves, fire all three simultaneously in parallel:**
+> Note: HG_AIRFLOW, DATAFOX_AIRFLOW, APACHE_AIRFLOW_ROLES, and EVIDENCE_OF_AIRFLOW are NOT used for gate decisions — these signals are unreliable and cannot be trusted for stack confirmation.
 
-2a. **Contacts**:
-```
-mcp__commonroom__commonroom_list_objects(
-  objectType="Contact",
-  filter={type:"and", clauses:[{type:"stringFilter", field:"companyWebsite", params:{op:"like", value:"{DOMAIN}"}}]},
-  properties=["primaryEmail","title","fullName","recentActivities","recentWebPages","recentWebVisitsNumber","leadScores","profiles","sparkSummary"],
-  sort="latest_activity", direction="desc", limit=10
-)
-```
+### Step 4: Targeted Web Research
 
-2b. **Recent activity** (only if orgId found):
-```
-mcp__commonroom__commonroom_list_objects(
-  objectType="Activity",
-  filter={type:"and", clauses:[
-    {type:"stringFilter", field:"orgId", params:{op:"eq", value:"{ORG_ID}"}},
-    {type:"dateRangeFilter", field:"activityTime", params:{op:"in", value:"P90D", min:null, max:null}}
-  ]},
-  properties=["content","url","activityTime","providerName"],
-  sort="activityTime", direction="desc", limit=20
-)
-```
+Launch a **single web research agent** with scope determined by `RESEARCH_DEPTH`.
 
-2c. **Website visits**:
-```
-mcp__commonroom__commonroom_list_objects(
-  objectType="WebsiteVisit",
-  filter={type:"and", clauses:[
-    {type:"and", target:"Contact", objectConfigId:null, targetAssocPaths:null,
-     clauses:[{type:"stringFilter", field:"companyWebsite", params:{op:"like", value:"{DOMAIN}"}}]},
-    {type:"dateRangeFilter", field:"visitTime", params:{op:"in", value:"P90D", min:null, max:null}}
-  ]},
-  properties=["url"], limit=20
-)
-```
+**Context to pass to the agent from Step 2:**
+- CRM status, opp history, contact intent signals, any Airflow mentions from Gong discovery. Do NOT pass HG/DataFox/CF stack signals — agent must independently confirm stack via web.
 
-For each contact from 2a, assign a value tier:
-- **HIGH** (decision-makers/champions): VP/Director of Engineering, Head/Director of Data, Data Platform Engineer/Manager, Data Architect, ML Platform, Staff/Principal Data Engineer
-- **MED** (users, not buyers): Data Engineer, Analytics Engineer, Data Scientist, Data Analyst
-- **LOW** (not relevant for outreach): Marketing, Sales, Finance, HR, other non-technical roles
+**Use Exa MCP tools for all web research:**
+- `mcp__exa__web_search_exa` — standard keyword searches
+- `mcp__exa__web_search_advanced_exa` — searches requiring date filters or domain restrictions
+- `mcp__exa__company_research_exa` — company background, funding, self-description
+- `mcp__exa__crawling_exa` — fetch specific URLs (replaces WebFetch)
 
-Flag any HIGH-tier contacts visiting Astronomer pages — that's an active buying signal.
+**Always run (both FULL and ABBREVIATED):**
 
-#### Agent 3: Gong Call History (only if `GONG_HAS_CALLS=true`)
+1. **Job postings** — three parallel Exa searches:
+   ```
+   mcp__exa__web_search_exa('{COMPANY_NAME} site:greenhouse.io OR site:lever.co OR site:ashbyhq.com data engineer OR data platform OR platform engineer OR ML engineer OR MLOps OR analytics engineer OR data infrastructure')
+   mcp__exa__web_search_exa('{COMPANY_NAME} site:greenhouse.io OR site:lever.co OR site:ashbyhq.com Apache Airflow OR dagster OR prefect OR data orchestration')
+   mcp__exa__web_search_exa('site:linkedin.com/jobs {COMPANY_NAME} data engineer OR data platform OR MLOps OR Apache Airflow')
+   ```
+   After results: `mcp__exa__crawling_exa` on up to 3 job posting URLs. Extract: named tools verbatim, orchestration mentions, cloud platform, pain point language, team name.
 
-Run in parallel with Agent 2. Dedicated agent so transcript volume doesn't pressure Agent 2's context window. Query Snowflake using `mcp__snowflake__execute_query`.
+2. **Recent news + M&A** — two parallel Exa searches:
+   ```
+   mcp__exa__web_search_advanced_exa('{COMPANY_NAME} funding OR acquisition OR Series OR layoff OR "new CTO" OR "Chief Data Officer"', start_published_date='2025-03-09')
+   mcp__exa__web_search_exa('{COMPANY_NAME} acquired OR "acquired by" OR merger OR IPO OR bankruptcy OR shutdown')
+   ```
+   Determine M&A STATUS: ACQUIRED / MERGER / IPO / BANKRUPTCY / SHUTDOWN / NONE FOUND.
 
-**If `GONG_CALL_COUNT <= 20` — single query (all data at once):**
+**FULL mode only (skip in ABBREVIATED):**
 
-```sql
-SELECT
-    t.CALL_ID, t.CALL_TITLE, t.CALL_URL, t.SCHEDULED_TS,
-    t.ACCT_NAME, t.OPP_NAME, c.OPP_STAGE_AT_CALL, c.CALL_DURATION,
-    t.CALL_BRIEF, t.CALL_NEXT_STEPS, t.ATTENDEES,
-    c.PRIMARY_EMPLOYEE, t.FULL_TRANSCRIPT
-FROM HQ.MODEL_CRM_SENSITIVE.GONG_CALL_TRANSCRIPTS t
-JOIN HQ.MODEL_CRM_SENSITIVE.GONG_CALLS c ON t.CALL_ID = c.CALL_ID
-WHERE UPPER(t.ACCT_NAME) LIKE UPPER('%{COMPANY_NAME}%')
-  AND c.IS_DELETED = FALSE
-ORDER BY t.SCHEDULED_TS DESC
-```
+3. **Orchestration evidence** — always run:
+   ```
+   mcp__exa__web_search_exa('"Apache Airflow" OR "Airflow DAG" OR dagster OR prefect {COMPANY_NAME}')
+   ```
 
-**If `GONG_CALL_COUNT > 20` — two-phase query to avoid single large result:**
+4. **Company overview + website**:
+   ```
+   mcp__exa__company_research_exa('{COMPANY_NAME}')
+   mcp__exa__crawling_exa('https://{DOMAIN}')
+   ```
+   Extract: self-description, data-intensity signals, customer segments, partner logos.
 
-Phase 1 — fetch all call metadata without transcripts:
-```sql
-SELECT
-    t.CALL_ID, t.CALL_TITLE, t.CALL_URL, t.SCHEDULED_TS,
-    t.ACCT_NAME, t.OPP_NAME, c.OPP_STAGE_AT_CALL, c.CALL_DURATION,
-    t.CALL_BRIEF, t.CALL_NEXT_STEPS, t.ATTENDEES,
-    c.PRIMARY_EMPLOYEE
-FROM HQ.MODEL_CRM_SENSITIVE.GONG_CALL_TRANSCRIPTS t
-JOIN HQ.MODEL_CRM_SENSITIVE.GONG_CALLS c ON t.CALL_ID = c.CALL_ID
-WHERE UPPER(t.ACCT_NAME) LIKE UPPER('%{COMPANY_NAME}%')
-  AND c.IS_DELETED = FALSE
-ORDER BY t.SCHEDULED_TS DESC
-```
+5. **Engineering blog** — discovery + fetch:
+   ```
+   mcp__exa__web_search_advanced_exa('{COMPANY_NAME} engineering blog OR data infrastructure OR data platform OR pipeline', start_published_date='2024-09-01')
+   ```
+   `mcp__exa__crawling_exa` on top 1-2 post URLs. Extract: tools named verbatim, architecture decisions, pain points.
 
-Phase 2 — fetch transcripts in batches of 10 `CALL_ID`s at a time (run batches in parallel):
-```sql
-SELECT CALL_ID, FULL_TRANSCRIPT
-FROM HQ.MODEL_CRM_SENSITIVE.GONG_CALL_TRANSCRIPTS
-WHERE CALL_ID IN ('<id1>', '<id2>', ..., '<id10>')
-```
-Repeat until all `CALL_ID`s from Phase 1 are covered. Join Phase 2 results back to Phase 1 metadata by `CALL_ID`.
+6. **Case studies + GitHub**:
+   ```
+   mcp__exa__web_search_exa('{COMPANY_NAME} Snowflake OR Databricks OR dbt OR AWS OR Google Cloud OR Azure case study OR customer OR partner')
+   mcp__exa__web_search_exa('site:github.com {COMPANY_NAME} airflow OR dbt OR dagster OR prefect OR data pipeline')
+   ```
+   If GitHub org found, `mcp__exa__crawling_exa` on it.
 
-If no results on any query, try a looser name match (first word only, or known abbreviations).
+7. **Conference speakers**:
+   ```
+   mcp__exa__web_search_exa('{COMPANY_NAME} airflowsummit.org OR dbt Coalesce OR Data Council employee speaker')
+   ```
 
-Extract from all calls: call dates, participants (from `ATTENDEES`), topics, pain points, tech stack mentions, deal stage (`OPP_STAGE_AT_CALL`), follow-up items (`CALL_NEXT_STEPS`), and full transcript text (`FULL_TRANSCRIPT`).
-
-**All transcript data must be preserved in full.** Do not truncate, summarize, or drop any calls or transcript content.
-
-**Email history**: Not available via Snowflake — record "Email history not available (Snowflake source)." in the Email History section.
-
-### Step 4: Assemble RAW INTELLIGENCE Block
-
-```markdown
----
-# RAW INTELLIGENCE: {COMPANY_NAME} ({DOMAIN})
-# Collected: {TODAY_DATE}
----
-
-## SOURCE: EXA AI
-
-### Company Research
-**Self-description**: [exact language they use about their product/mission]
-**Employee count**: [N] (growth rate if available)
-**Revenue / Funding stage**: [ARR or round + amount + date]
-**Industry vertical**: [fintech / healthcare / logistics / SaaS / etc.]
-**Business model**: [is the core product data-intensive? yes/no + one-line reason]
-**Tech stack signals**: [any tools mentioned in profile]
-**Data/AI positioning**: [do they call themselves data-driven, AI-powered, etc. — quote]
-
-### Orchestration & Pipeline Evidence
-For each relevant result:
-- **Orchestration tool named**: [Airflow (existing user) / Dagster/Prefect (competitor) / Luigi/Argo/Kubeflow/custom (opportunity) / none found]
-- **Data volume/scale**: [exact verbatim phrase — e.g. "processing 10M events/day"]
-- **Pipeline frequency**: [batch (daily/hourly) / streaming / real-time / unknown]
-- **Migration story**: [moved from X to Y — quote if found]
-- **Architecture signals**: [data mesh / lakehouse / microservices / monolith]
-- **Source**: [URL — date]
-
-### Hiring Signals
-**Job board search method**: [title search / tool search / domain search / fallback]
-**Open roles (all data/ML/platform/infra titles)**: [list all role titles found — include ML Eng, MLOps, Analytics Eng, Data Architect, etc.]
-**Roles mentioning orchestration tools**: [list any role — regardless of title — that names Airflow/Dagster/Prefect/etc.]
-**Key tool requirements (verbatim from JDs)**:
-- Orchestration: [Airflow / Dagster / Prefect / none mentioned — quote exact phrase if present]
-- Data stack: [dbt / Spark / Snowflake / Databricks / Kafka / Flink / MLflow / etc.]
-- Cloud: [AWS / GCP / Azure]
-**Scale language (verbatim)**: [exact phrases — e.g. "managing hundreds of DAGs"]
-**Orchestration explicitly mentioned**: [Yes — quote / No]
-**Build vs. maintain framing**: [greenfield / scaling existing / unknown — quote]
-**Pain point language (verbatim)**: [reliability / observability / SLA / on-call / data quality — quote]
-**Team name**: [Data Platform / ML Infrastructure / Data Engineering / MLOps / etc.]
-**Seniority signal**: [Staff/Principal/Director = mature org / entry-level = early stage]
-
-### Recent News
-
-**M&A STATUS**: [ACQUIRED by {Buyer} on {date} / MERGER with {Company} on {date} / IPO on {date} / BANKRUPTCY filed {date} / SHUTDOWN on {date} / NONE FOUND]
-**M&A Impact**: [If not NONE FOUND — 1-2 sentences on what this means for outreach: who is now the buyer, whether budget is frozen, whether stack will be consolidated into parent]
-
-For each additional news item:
-- **Type**: [funding / leadership hire / layoff / product launch / partnership]
-- **Summary**: [1-2 sentences]
-- **Signal for Astronomer**: [what this means — e.g. "Series C = budget for tooling", "new CDO = buying motion likely", "layoffs = cost-cutting mode"]
-- **Source + date**: [URL — date]
-
-### Website Content
-**Self-description**: [exact language around data/scale/automation]
-**Customer segments**: [enterprise / SMB / regulated industries / etc.]
-**Tech/partner mentions**: [any tools or cloud logos visible]
-**Data-intensity signals**: [verbatim — "real-time", "AI-powered", "processes X transactions"]
-**Scale claims**: [verbatim — e.g. "serving 500 enterprise customers"]
-**Engineering/Platform section in nav**: [Yes / No]
-
-### Engineering & Data Blog Posts
-For each post found:
-- **Title + URL + date**:
-- **Tools named**: [exact names]
-- **Scale/volume metrics**: [if present]
-- **Architecture decision**: [verbatim — "we chose X because Y"]
-- **Pain points described**: [what problems they were solving]
-- **Signal**: [what this tells us about Airflow fit]
-[If no engineering blog found: "No public engineering blog found — signals lower data platform maturity."]
-
-### Product Announcements
-For each relevant item:
-- **Announcement**: [what launched]
-- **Data/AI relevance**: [does this increase pipeline complexity? yes/no + reason]
-- **Source + date**: [URL — date]
-
-### Case Studies & Third-Party Mentions
-For each case study found:
-- **Published by**: [Snowflake / dbt / AWS / etc. — confirms they are a customer]
-- **Tools/vendors named**: [every tool mentioned]
-- **Use case**: [batch ETL / real-time / ML pipelines / etc.]
-- **Scale numbers**: [if present]
-- **Business problem described**: [verbatim quote — maps to Astronomer use cases]
-- **Source URL**:
-
-### GitHub Org
-**GitHub org found**: [Yes — URL / No]
-**Relevant repos**: [list repo names — e.g. airflow-dags, data-platform, dbt-models, ml-pipelines]
-**Stack confirmation**: [tools confirmed from repo names/contents — Airflow / dbt / Spark / etc.]
-**Signal**: [e.g. "public airflow-dags repo = confirmed Airflow user" / "No GitHub org found"]
-
-### Conference & Speaker Signals
-For each signal found:
-- **Speaker name + title**:
-- **Conference + date**:
-- **Talk title**:
-- **Tools mentioned**:
-- **Signal**: [e.g. "VP Data Engineering spoke at Airflow Summit 2025 = confirmed Airflow user and champion"]
-[If nothing found: "No conference speaker signals found."]
-
----
-
-## SOURCE: LEADFEEDER
-
-### Lead Match
-[Found / Not Found]
-
-### Visit Summary
-**Total visits**: [N] | **Date range**: [first–last] | **Last visited**: [date]
-
-### Page Visits
-[list of URLs with dates]
-**High-intent flags**: [any /pricing, /demo, /astro, /docs, /trial visits — note date and whether repeated]
-
----
-
-## SOURCE: COMMON ROOM
-
-### Organization Profile
-**Employees**: [N] | **Revenue range**: [min–max] | **Industry**: [industry]
-**Lead score**: [score] | **Tags**: [list]
-**About**: [1-2 sentence summary]
-
-### Contacts (Top 10 by recent activity)
-For each contact:
-- **Name | Title | Email**
-- **Value tier**: [HIGH / MED / LOW — see tier definitions in instructions]
-- **Recent activity**: [what they did + date]
-- **Astronomer site visits**: [Yes — URLs / No]
-
-### Recent Community Activity (Last 90 Days)
-For each activity:
-- **Content**: [what they did]
-- **Source**: [GitHub / Slack / community / etc.]
-- **Signal**: [e.g. "starred apache/airflow repo" = existing Airflow interest]
-- **Date**:
-
-### Website Visits (Last 90 Days)
-[list of visited URLs — flag /pricing, /demo, /docs, /astro]
-
----
-
-## SOURCE: GONG
-
-### Prior Conversations
-[Found / Not Found — if not found: "No prior Gong calls found. Cold outreach."]
-
-### Call Summary
-For each call:
-- **Date | Participants (name + title)**
-- **Summary**: [2-3 sentences]
-
-### Key Intelligence from Calls
-- **Pain points**: [exact quotes where possible]
-- **Objections raised**: [what they pushed back on]
-- **Decision-makers identified**: [name + title]
-- **Deal stage**: [prospecting / discovery / evaluation / negotiation / closed-lost]
-- **Follow-up items**: [what was committed to]
-
-### Tech Stack from Calls
-[tool: mentioned in call dated X]
-
-### Email History
-[Found / Not Found — if not available: "Email integration not configured in this workspace."]
-[If found: date | direction (inbound/outbound) | subject | key content excerpt]
-
-### Full Transcripts
-[full transcript text]
-```
-
-**Size constraint**: The entire RAW INTELLIGENCE block must be under 3,000 words. Fill in only the labeled field values — do NOT paste raw search result snippets, full crawl text, or unprocessed API responses verbatim. If a field has no data, write `[not found]`. Every entry should be a single extracted fact, quote, or short list.
-
-### Step 5: Generate Fit Score + Account Research (Single Pass)
+### Step 5: Generate Report Directly
 
 Read both prompt templates:
 - `~/claude-work/research-assistant/prompts/01_fit_scoring.md`
 - `~/claude-work/research-assistant/prompts/02_account_research.md`
 
-**Context order** (stable content first for prompt caching):
+**Do not assemble a RAW INTELLIGENCE intermediate block.** Feed all data directly into a single generation pass:
+
+**Context to the model** (in this order for cache efficiency):
 1. Prompt template 1 (fit scoring rubric)
 2. Prompt template 2 (AE brief template)
-3. RAW INTELLIGENCE block
+3. Snowflake data block (structured, labeled by source table)
+4. Web research findings
 
-In a single generation pass, produce the fit score section followed by the account research section.
+**Snowflake data block format** (compact, structured):
+```
+=== SNOWFLAKE: SF_ACCOUNTS ===
+CRM status: {IS_CURRENT_CUST / IS_CHURNED_CUST / prospect}
+Owner: {OWNER_NAME} | Region: {SALES_REGION} | Segment: {SEGMENT_PLANNED}
+Industry: {INDUSTRY} | Country: {BILLING_COUNTRY}
+ICP: {ICP_DESIGNATION_V2} | Acct Score: {ACCT_SCORE} ({ACCT_SCORE_POSITIVE_DRIVERS} / {ACCT_SCORE_NEGATIVE_DRIVERS})
+Smoke: {SMOKE_SCORE} | Fire: {FIRE_SCORE}
+Last MQL: {LAST_MQL_DATE} | Cosmos doc: {LAST_COSMOS_DOC_VIEW_DATE} | DAG factory: {LAST_DAG_FACTORY_DOWNLOAD_DATE}
+
+=== SNOWFLAKE: SF_CONTACTS (top contacts by recency) ===
+[For each contact: Title | Lead score | Pricing page visit: {date or none} | Airflow debug visit: {date or none} | DAG debug visit: {date or none} | MQL: {date or none} | Opted out: {yes/no}]
+
+=== SNOWFLAKE: LF_WEBSITE_VISITS ===
+[Total visits (last 6mo): N | First: {date} | Last: {date}]
+[Page list: URL | date | duration — flag /pricing, /demo, /astro, /trial as HIGH intent]
+[If none: "No Leadfeeder visits — not matched in Salesforce or no visits."]
+
+=== SNOWFLAKE: SF_OPPS ===
+[For each opp: Name | Stage | Won/Lost | ACV | Created | Close date]
+[Loss reason: {LOSS_REASON} — {LOSS_DETAILS}]
+[Competition: {COMPETITION}]
+[Airflow experience: {AIRFLOW_EXPERIENCE} | Deployment model: {CURRENT_AIRFLOW_DEPLOYMENT_MODEL} | Versions: {CURRENT_AIRFLOW_VERSIONS} | Env count: {CURRENT_AIRFLOW_ENVIRONMENTS_COUNT}]
+[Cloud provider: {CLOUD_PROVIDER}]
+
+=== SNOWFLAKE: GONG_CALL_TRANSCRIPTS ===
+[Found N calls / No prior calls — cold outreach]
+[For each call: Date | Participants | Brief | Next steps | Full transcript]
+```
+
+In a single generation pass, produce:
+1. Fit score section (using rubric from template 1)
+2. Full AE brief (using template 2)
+
+The fit scoring rubric uses tags `[EXA]`, `[LF]`, `[CR]` — map these to `[WEB]`, `[SF-LF]`, `[SF-CR]` respectively when Snowflake is the source.
 
 ### Step 6: Compose Final Report
 
-**Generate company slug**: lowercase, spaces → underscores, remove special chars.
+Generate slug: lowercase, spaces → underscores, remove special chars. Check for collision.
 
-**Changelog detection** — check for existing report at `~/claude-work/research-assistant/outputs/accounts/{company_slug}/report.md`. If found, extract prior score/grade/confidence and changelog entries. Generate a new changelog entry if any significant change:
-- Score changed ≥2 points
-- Grade letter changed
-- New Leadfeeder visits to pricing/demo/docs pages
-- New hiring signals mentioning Airflow/orchestration/data platform
-- New Common Room contacts with VP Eng / Head of Data titles
-- New funding or acquisitions
-- **M&A event detected** (acquisition, merger, IPO, bankruptcy, or shutdown) — always generate a changelog entry regardless of score change
-- **Signal lost**: if a previously cited high-signal finding is no longer present in this run, note it explicitly — e.g. "Signal lost: Airflow job posting (Senior Data Engineer, cited 2026-01-15) no longer found — likely filled or expired" or "Signal lost: key contact [Name] no longer appears at company." This is critical context for score drops — the changelog entry should explain *why* the score changed, not just *that* it changed.
+Check for existing report at `~/claude-work/research-assistant/outputs/accounts/{SLUG}/report.md`. If found, extract prior score/grade and generate changelog entry if:
+- Score changed ≥2 points, grade letter changed
+- New LF visits to /pricing, /demo, /astro, /trial
+- New SF_CONTACTS pricing page or Airflow debug visits
+- New hiring signals mentioning Airflow/orchestration
+- M&A event detected
+- Opp stage changed
+- Signal lost (job posting filled, contact departed, HG signal dropped)
 
 ```markdown
 # Account Research Report: {COMPANY_NAME}
 
 **Generated**: {TODAY_DATE}
 **Website**: https://{DOMAIN}
-**Sources**: Web Search ✓ | Leadfeeder ✓/✗ | Common Room ✓/✗ | Gong (Snowflake) ✓/✗
+**Sources**: Snowflake (SF_ACCOUNTS ✓/✗ | LF_VISITS ✓/✗ | SF_OPPS ✓/✗ | Gong ✓/✗) | Web Search ✓
 
-[If M&A STATUS is anything other than NONE FOUND, insert this block immediately after the header:]
+[If M&A STATUS ≠ NONE FOUND:]
 > **M&A ALERT: {M&A STATUS}**
-> {M&A Impact — who acquired them, what it means for outreach, whether to contact this account or the parent. Include the date and source URL.}
+> {1-2 sentence impact on outreach}
 
 ---
-
 [Fit Score section]
-
 ---
-
-[Account Research section]
-
+[AE Brief section]
 ---
-
 ## Changelog
-
 ### {TODAY_DATE}
 - [change or "First research generated. Grade: {GRADE}, Score: {SCORE}/20, Confidence: {CONFIDENCE}"]
-
-[prior changelog entries preserved below, newest first]
+[prior entries preserved, newest first]
 ```
 
 ### Step 7: Save Report
 
-Create the directory if it doesn't exist, then write the file:
 ```bash
-mkdir -p ~/claude-work/research-assistant/outputs/accounts/{company_slug}/
+mkdir -p ~/claude-work/research-assistant/outputs/accounts/{SLUG}/
 ```
-Overwrite: `~/claude-work/research-assistant/outputs/accounts/{company_slug}/report.md`
+Overwrite: `~/claude-work/research-assistant/outputs/accounts/{SLUG}/report.md`
 
-### Step 8: Update Apollo Account_Research Field
+### Step 8: Update Apollo
 
-Skip entirely if no `APOLLO_API_KEY` (from pre-flight). Log "Apollo sync skipped — no API key."
+Skip if no `APOLLO_API_KEY`. Use `APOLLO_ID` from Step 2 pre-fetch if found; otherwise search by name + confirm by domain.
 
-- **Field ID**: `6998b33edacda9000deb48ca`
-- Use `typed_custom_fields` (keyed by field ID), NOT `custom_fields` (silently ignored)
-- **Input override**: If the user provided a direct Apollo URL (e.g. `https://app.apollo.io/#/accounts/{ID}`), extract the account ID and skip account lookup entirely — go straight to step 2.
+```bash
+source ~/.zshrc
+APOLLO_REPORT=$(python3 -c "
+import re, sys
+content = open(sys.argv[1]).read()
+if len(content) <= 60000:
+    print(content); exit(0)
+truncated = re.sub(r'(### Full Transcripts\n).*', r'\1[Truncated — see local report.md]', content, flags=re.DOTALL)
+if len(truncated) > 60000:
+    truncated = truncated[:60000] + '\n\n[Truncated at 60,000 chars for Apollo]'
+print(truncated)
+" ~/claude-work/research-assistant/outputs/accounts/{SLUG}/report.md)
 
-1. Find account — if `APOLLO_ACCOUNT_ID` was already found in pre-flight Step 2e, use it directly (skip this search). Otherwise search by name, confirm by domain:
-   ```bash
-   curl -s -X POST "https://api.apollo.io/v1/accounts/search" \
-     -H "Content-Type: application/json" \
-     -d "{\"api_key\": \"$APOLLO_API_KEY\", \"q_organization_name\": \"{COMPANY_NAME}\", \"per_page\": 10}"
-   ```
-   Filter to the result where `account.domain == "{DOMAIN}"`. Apply ownership filtering as documented in the original Step 8. If no domain match found, skip and log: "Apollo: No account found matching domain {DOMAIN}."
-
-2. Write report and verify success:
-   ```bash
-   # Truncate for Apollo field limit (~65,000 chars). Drops Full Transcripts first,
-   # then hard-truncates if still over. Local report.md is never modified.
-   APOLLO_REPORT=$(python3 -c "
-   import re, sys
-   content = open(sys.argv[1]).read()
-   if len(content) <= 60000:
-       print(content); sys.exit(0)
-   truncated = re.sub(
-       r'(### Full Transcripts\n).*',
-       r'\1[Truncated — see local report.md for full transcripts]',
-       content, flags=re.DOTALL
-   )
-   if len(truncated) > 60000:
-       truncated = truncated[:60000] + '\n\n[Report truncated at 60,000 chars for Apollo field limit]'
-   print(truncated)
-   " ~/claude-work/research-assistant/outputs/accounts/{COMPANY_SLUG}/report.md)
-
-   RESPONSE=$(curl -s -w "\nHTTP_STATUS:%{http_code}" -X PUT "https://api.apollo.io/v1/accounts/{ACCOUNT_ID}" \
-     -H "Content-Type: application/json" \
-     -d "{\"api_key\": \"$APOLLO_API_KEY\", \"typed_custom_fields\": {\"6998b33edacda9000deb48ca\": $(echo "$APOLLO_REPORT" | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read()))' )}}")
-   HTTP_STATUS=$(echo "$RESPONSE" | grep "HTTP_STATUS:" | cut -d: -f2)
-   if [ "$HTTP_STATUS" = "200" ]; then
-     echo "Apollo: write succeeded"
-   else
-     echo "Apollo: write FAILED — HTTP $HTTP_STATUS"
-     echo "$RESPONSE"
-   fi
-   ```
+RESPONSE=$(curl -s -w "\nHTTP_STATUS:%{http_code}" -X PUT "https://api.apollo.io/v1/accounts/{APOLLO_ID}" \
+  -H "Content-Type: application/json" \
+  -d "{\"api_key\": \"$APOLLO_API_KEY\", \"typed_custom_fields\": {\"{YOUR_APOLLO_ACCOUNT_RESEARCH_FIELD_ID}\": $(echo "$APOLLO_REPORT" | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read()))' )}}")
+HTTP_STATUS=$(echo "$RESPONSE" | grep "HTTP_STATUS:" | cut -d: -f2)
+[ "$HTTP_STATUS" = "200" ] && echo "Apollo: write succeeded" || echo "Apollo: write FAILED — HTTP $HTTP_STATUS"
+```
 
 ### Step 9: Present Results
 
-**Before displaying the report**, check the M&A STATUS field from the RAW INTELLIGENCE block. If it is anything other than NONE FOUND, output this alert first as a standalone message — before the score, before the report, before anything else:
-
+If M&A STATUS ≠ NONE FOUND, output this first before anything else:
 ```
 ⚠️  M&A ALERT: {COMPANY_NAME}
 {M&A STATUS} — {date}
-{1-2 sentence plain-English summary: who acquired them / what the merger was / what happened, and what the rep should do next — e.g. "Acme Corp was acquired by BigCo in March 2025. You may need to route this to the BigCo account owner before pursuing — check with your manager."}
+{Plain-English: what happened, what the rep should do next.}
 Source: {URL}
 ```
 
-If M&A STATUS is NONE FOUND, skip the alert entirely.
-
-Then display the full report. Highlight fit score/grade, notable buying signals, and changelog if this is a re-run.
-
-**For batch mode**, after the batch summary table, add a separate section listing any M&A alerts across all completed accounts:
-
-```
---- M&A ALERTS ---
-The following accounts had acquisition, merger, or other corporate events detected.
-Verify account ownership before outreach:
-
-- Acme Corp — ACQUIRED by BigCo (March 2025) — may need re-routing
-- Beta Inc — BANKRUPTCY filed (Jan 2025) — do not pursue
-```
-
-If no M&A events were found across the batch, omit this section entirely.
+Then display the full report. Highlight fit score/grade, top buying signals, and changelog if re-run.
 
 ---
 
 ## BATCH MODE
 
 ### Batch Step 1: Load CSV
-Columns: `company_name`, `domain`. Be flexible with header names.
+Columns: `company_name`, `domain`. Flexible with header names. Detect `force` flag.
 
-### Batch Step 2: Pre-fetch Leadfeeder Data
+### Batch Step 2: Bulk Snowflake Pre-fetch
 
-**Check disk cache first** to avoid re-fetching on re-runs:
-```bash
-python3 -c "
-import json, os, time
-cache = os.path.expanduser('~/claude-work/leadfeeder-cache/leads.json')
-if os.path.exists(cache):
-    age_hours = (time.time() - os.path.getmtime(cache)) / 3600
-    if age_hours < 168:  # 7-day TTL
-        data = json.load(open(cache))
-        print(f'LEADFEEDER_CACHE_HIT: {len(data)} leads, {age_hours:.1f}h old ({age_hours/24:.1f} days)')
-        exit(0)
-print('LEADFEEDER_CACHE_MISS')
-"
+**Skip the Leadfeeder MCP entirely.** Instead, pull SF_ACCOUNTS + LF data for all companies in a single query batch before spawning any subagents.
+
+For each company, generate its slug and check for existing valid report (skip if complete and not force mode).
+
+For the NEEDS_RUN companies, run one batch Snowflake query:
+```sql
+SELECT
+  a.ACCT_ID, a.ACCT_NAME, a.ACCT_DOMAIN, a.ACCT_TYPE, a.ACCT_STATUS,
+  a.IS_CURRENT_CUST, a.ICP_DESIGNATION_V2, a.ACCT_SCORE,
+  a.SMOKE_SCORE, a.FIRE_SCORE, a.LAST_MQL_DATE,
+  a.INDUSTRY, a.OWNER_NAME, a.BILLING_COUNTRY
+FROM HQ.MODEL_CRM.SF_ACCOUNTS a
+WHERE LOWER(a.ACCT_DOMAIN) IN ({comma-separated lowercased domains})
+  AND a.ACCT_TYPE NOT IN ('Internal', 'Competitor')
+```
+This pre-determines `RESEARCH_DEPTH` (FULL vs ABBREVIATED) for each company and provides `SF_ACCT_ID` for the individual queries.
+
+Also check Gong call counts for all companies in one query:
+```sql
+SELECT t.ACCT_NAME, COUNT(*) AS call_count
+FROM HQ.MODEL_CRM_SENSITIVE.GONG_CALL_TRANSCRIPTS t
+JOIN HQ.MODEL_CRM_SENSITIVE.GONG_CALLS c ON t.CALL_ID = c.CALL_ID
+WHERE c.IS_DELETED = FALSE
+  AND UPPER(t.ACCT_NAME) IN ({comma-separated uppercased names})
+GROUP BY t.ACCT_NAME
 ```
 
-If `LEADFEEDER_CACHE_HIT`: load leads from `~/claude-work/leadfeeder-cache/leads.json` and skip the API calls below.
+### Batch Step 3: Process Companies (Groups of 5 Simultaneous Subagents)
 
-If `LEADFEEDER_CACHE_MISS`: pull all leads via API (up to 20 pages of 100):
-```
-mcp__leadfeeder__get_leads({YOUR_LEADFEEDER_ACCOUNT_ID}, start_date=[6mo ago], end_date=[today], page_size=100, page=N)
-```
-Stop when a page returns <100 results. Store only: `id`, `name`, `website`, `visit_count`, `last_visited_at`.
+For each group of up to 5 companies, spawn all subagents simultaneously.
 
-Then save to cache:
-```bash
-mkdir -p ~/claude-work/leadfeeder-cache/
-# Write collected leads list to file:
-python3 -c "
-import json, os
-# leads = [list of {id, name, website, visit_count, last_visited_at} dicts collected above]
-with open(os.path.expanduser('~/claude-work/leadfeeder-cache/leads.json'), 'w') as f:
-    json.dump(leads, f)
-print(f'Cached {len(leads)} leads')
-"
-```
+Each subagent task must embed the full Step 2–7 instructions inline (substituting all variables). Pass the pre-fetched Snowflake summary for that company so the subagent can skip Query A (already done) and go straight to Queries B–E.
 
-### Batch Step 3: Generate Slugs + Check for Resume
+Key subagent instructions:
+- `SF_ACCT_ID` is provided — skip Query A, use it directly for B–E
+- `RESEARCH_DEPTH` is provided — scope web research accordingly
+- Skip Step 8 (Apollo) and Step 9 (display) — orchestrator handles these
+- When finished respond with only: `"{COMPANY_NAME} complete"` or `"{COMPANY_NAME} error: [reason]"`
+- Do NOT return the report in the response
 
-**Detect force flag**: if the input ends with ` force` (e.g., `batch: /path/file.csv force`), set `FORCE_RERUN=true`. In force mode, all companies are treated as `NEEDS_RUN` regardless of existing report state — skip the SKIP check in step (b). Prior changelog entries are still preserved (the report is re-read before overwriting in Step 6).
-
-For each company in the CSV:
-
-**a) Generate slug upfront** — do this before anything else. Rule: lowercase, spaces → underscores, remove all non-alphanumeric characters except underscores. Then check for collision:
-```bash
-python3 -c "
-import os, re, sys
-name = sys.argv[1]
-base_slug = re.sub(r'[^a-z0-9_]', '', name.lower().replace(' ', '_'))
-slug = base_slug
-n = 2
-while True:
-    path = os.path.expanduser(f'~/claude-work/research-assistant/outputs/accounts/{slug}/report.md')
-    if not os.path.exists(path):
-        break  # directory is free
-    content = open(path).read()
-    # Check if the existing report is for the same company (case-insensitive name match)
-    if name.lower() in content[:500].lower():
-        break  # same company — safe to overwrite
-    slug = f'{base_slug}_{n}'
-    n += 1
-print(slug)
-" "{COMPANY_NAME}"
-```
-Store the result as `COMPANY_SLUG`.
-
-**b) Check for a valid existing report** (skip entirely if `FORCE_RERUN=true`):
+**Verify each report** after subagent responds:
 ```bash
 python3 -c "
 import os, sys
-path = os.path.expanduser('~/claude-work/research-assistant/outputs/accounts/{COMPANY_SLUG}/report.md')
-if not os.path.exists(path):
-    print('NEEDS_RUN')
-    sys.exit(0)
+path = os.path.expanduser('~/claude-work/research-assistant/outputs/accounts/{SLUG}/report.md')
+if not os.path.exists(path): print('FAIL: file missing'); exit(1)
 content = open(path).read()
-required = ['# Account Research Report:', '**Generated**:', '**Sources**:']
-missing = [s for s in required if s not in content]
-if missing or len(content) < 2000:
-    print('NEEDS_RUN')  # file exists but is incomplete — rerun
-else:
-    print('SKIP')
-" 2>/dev/null || echo "NEEDS_RUN"
-```
-Skip only companies that return `SKIP`. Incomplete or missing reports always run. In `FORCE_RERUN=true` mode, all companies return `NEEDS_RUN`.
-
-### Batch Step 4: Process Companies (Groups of 5 Simultaneous Subagents)
-
-Process companies in groups of 5. For each group of up to 5 unprocessed companies:
-
-**a) Pre-match Leadfeeder for all companies in the group** (before spawning any subagents):
-For each company, search the pre-fetched leads for a record where `name` or `website` matches `{COMPANY_NAME}` or `{DOMAIN}`. Store as `LEADFEEDER_MATCH`:
-- If found: `{ lead_id, name, website, visit_count, last_visited_at }`
-- If not found: `"no match"`
-
-**b) Spawn all subagents in the group simultaneously** (parallel Agent calls — do not wait for one before starting the next):
-
-The subagent has no access to this skill file. The task string must embed everything it needs. Construct the task as follows — substitute all `{variables}` before passing:
-
-```
-Agent(
-  subagent_type="general-purpose",
-  description="Research {COMPANY_NAME}",
-  prompt="""
-You are researching {COMPANY_NAME} ({DOMAIN}) for Astronomer sales fitness.
-Save the final report to: ~/claude-work/research-assistant/outputs/accounts/{COMPANY_SLUG}/report.md
-When finished, respond with only: "{COMPANY_NAME} complete" or "{COMPANY_NAME} error: [one-line reason]"
-Do NOT return the report content in your response.
-
-=== LEADFEEDER DATA (pre-fetched) ===
-{LEADFEEDER_MATCH}
-If a lead_id is provided above, call mcp__leadfeeder__get_lead_visits({YOUR_LEADFEEDER_ACCOUNT_ID}, lead_id=<id>, start_date=<6mo ago>, end_date=<today>) to get page visit URLs.
-If "no match", record "Not found" in the Leadfeeder section.
-
-=== RESEARCH INSTRUCTIONS ===
-[Embed the full text of SINGLE COMPANY MODE Steps 2–7 here, with {COMPANY_NAME}, {DOMAIN}, and {COMPANY_SLUG} substituted. Skip Step 2b Apollo key check — Apollo sync is handled separately after you complete. Skip Step 8 (Apollo) and Step 9 (display) entirely.]
-"""
-)
-```
-
-**Important**: Do not reference "the skill" or "Steps X-Y" in the task string. The subagent is isolated and will not find them. Embed the actual instructions inline.
-
-**c) Verify the report:**
-After the subagent responds (regardless of what it says), run:
-```bash
-python3 -c "
-import os, sys
-path = os.path.expanduser('~/claude-work/research-assistant/outputs/accounts/{COMPANY_SLUG}/report.md')
-if not os.path.exists(path):
-    print('FAIL: file missing')
-    sys.exit(1)
-content = open(path).read()
-required = ['# Account Research Report:', '**Generated**:', '**Sources**:']
-missing = [s for s in required if s not in content]
-if missing:
-    print(f'FAIL: missing sections {missing}')
-    sys.exit(1)
-if len(content) < 2000:
-    print(f'FAIL: report too short ({len(content)} chars)')
-    sys.exit(1)
+missing = [s for s in ['# Account Research Report:', '**Generated**:', '**Sources**:'] if s not in content]
+if missing or len(content) < 2000: print(f'FAIL: {missing or \"too short\"}'); exit(1)
 print('OK')
 " 2>&1
 ```
 
-**d) Retry once if verification fails:**
-If result is not `OK`, spawn the same agent one more time. Re-verify after. If it fails again, mark as `FAILED` with the verification error reason and move on — do not block the batch.
+Retry once on failure. If still failing, mark FAILED and continue.
 
-**e) Apollo sync (orchestrator runs this, not the subagent):**
-Only run if verification returned `OK` and `$APOLLO_API_KEY` is set. Use the Apollo instructions from Step 8 of SINGLE COMPANY MODE with `{COMPANY_NAME}`, `{DOMAIN}`, and `{COMPANY_SLUG}` substituted. Check the HTTP response — log `Apollo: write succeeded` or `Apollo: write FAILED — HTTP {status}`.
+**Apollo sync** (orchestrator, after each verification OK):
+Use Step 8 with substituted variables. Log result.
 
-**f) Log the result:**
-Append to `~/claude-work/research-assistant/outputs/batch_run_log.txt`:
+**Append to batch run log**:
 ```
-{TIMESTAMP} | {COMPANY_NAME} | {DOMAIN} | SUCCESS | Apollo: succeeded/failed/skipped
-```
-or on failure:
-```
-{TIMESTAMP} | {COMPANY_NAME} | {DOMAIN} | FAILED: [verification error]
+{TIMESTAMP} | {COMPANY_NAME} | {DOMAIN} | SUCCESS/FAILED | Apollo: ok/failed/skipped | Depth: FULL/ABBREVIATED
 ```
 
-**g) Update batch summary CSV for all companies in the group**, then pause 2 seconds before the next group.
+Pause 2 seconds between groups. For >50 companies: chunks of 50, pause 10 seconds between chunks.
 
-### Batch Step 5: Chunking
-If CSV has >50 companies: process in chunks of 50 (i.e. ~10 groups of 5), pause 10 seconds between chunks.
+### Batch Step 4: Batch Summary
 
-### Batch Step 6: Generate Batch Summary
-
-`~/claude-work/research-assistant/outputs/batch_summary.csv`:
+Write `~/claude-work/research-assistant/outputs/batch_summary.csv`:
 ```csv
-company,domain,score,grade,confidence,score_change,key_change,report_path,last_updated
+company,domain,score,grade,confidence,score_change,key_change,research_depth,report_path,last_updated
 ```
 
-Extract score/grade/confidence from each completed report:
-```bash
-python3 -c "
-import re, sys
-content = open(sys.argv[1]).read()
-score = (re.search(r'Score[:\s]+(\d+)\s*/\s*20', content) or ['',''])[1] or \
-        (re.search(r'\b(\d+)/20\b', content) or ['',''])[1]
-grade = (re.search(r'Grade[:\s]+([A-F][+\-]?)', content) or ['',''])[1]
-conf  = (re.search(r'Confidence[:\s]+(HIGH|MEDIUM|LOW)', content) or ['',''])[1]
-print(f'{score}|{grade}|{conf}')
-" ~/claude-work/research-assistant/outputs/accounts/{COMPANY_SLUG}/report.md
+Display: total processed / succeeded / failed, grade distribution, top 10 by score.
+
+For any M&A alerts found across the batch:
+```
+--- M&A ALERTS ---
+- Acme Corp — ACQUIRED by BigCo (March 2025) — may need re-routing
 ```
 
-`score_change`: compare extracted score against prior value in `batch_summary.csv` — format as `+N`, `-N`, `0`, or `NEW`. `key_change`: one-line summary or "No changes". For `FAILED` companies, leave score/grade/confidence blank and set `key_change` to the failure reason.
-
-### Batch Step 7: Batch Summary Output
-
-Display:
-- Total processed / succeeded / failed
-- Grade distribution (successes only)
-- Top 10 by score
-
-If any companies failed, display a **clear remediation block** at the end:
-
-```
---- COMPANIES REQUIRING RERUN ---
-
-The following X companies did not produce a complete report after 2 attempts.
-To rerun, use: /account-research batch: ~/claude-work/research-assistant/outputs/failed_rerun.csv
-
-Companies:
-- Acme Corp (acme.com) — error: [reason]
-- Beta Inc (beta.com) — error: [reason]
-
-Suggested fixes before rerunning:
-- "file missing" or "report too short": likely a subagent timeout — retry should resolve
-- "missing sections": check ~/claude-work/gong_account_transcripts.py is accessible
-- Any API errors: verify APOLLO_API_KEY, Leadfeeder MCP, and Exa MCP are connected
-```
-
-Also write a `failed_rerun.csv` to `~/claude-work/research-assistant/outputs/` containing only the failed companies (same `company_name,domain` format as the input CSV), ready to pass directly back into the skill.
+For failed companies, write `failed_rerun.csv` and display remediation block.
 
 ---
 
@@ -928,23 +443,30 @@ Also write a `failed_rerun.csv` to `~/claude-work/research-assistant/outputs/` c
 
 | Source | Failure Behavior |
 |--------|-----------------|
-| **Exa AI** | Optional enhancement only — Claude WebSearch + WebFetch are the primary research tools and require no fallback. If Exa MCP tools are available they can provide additional coverage. |
-| **Common Room** | Key Contacts section: "No Common Room data found." Contact intelligence from Gong/web only. |
-| **Leadfeeder** | Buying Signals caps at 1. Note "No website visit data" in Website Engagement section. |
-| **Gong calls** | Prior Conversations: "No prior Gong calls found. Cold outreach." |
-| **Gong emails** | Email History: "Email history not available (Snowflake source)." — expected, not an error. |
-| **Apollo** | Skip write-back. Report saves locally. Note "Apollo sync skipped." |
-| **Nothing connected** | Run all research via Claude's built-in web search. Report generates with fit score, tech stack, hiring signals, and outreach brief. Confidence: MEDIUM or LOW. |
+| **SF_ACCOUNTS not found** | RESEARCH_DEPTH=FULL by default; skip Queries B–D; note "New prospect — not yet in Salesforce" |
+| **LF_WEBSITE_VISITS empty** | Note "No Leadfeeder visits recorded" — do not attempt Leadfeeder MCP |
+| **SF_OPPS empty** | Note "No opportunity history" — cold outreach confirmed |
+| **Gong (no calls)** | Note "No prior calls — cold outreach" |
+| **Web search (no results)** | Note per section; reduce confidence |
+| **Apollo** | Skip write-back; report saves locally |
+| **Common Room** | Note "Common Room not available"; SF_CONTACTS covers contact intent signals |
+
+**Do NOT fall back to Leadfeeder MCP** — if the account isn't in Salesforce, it won't be in Leadfeeder either. The MCP is a slower path to the same data.
 
 ---
 
 ## Important Guidelines
 
-- Report file MUST be under 1,000,000 characters. Truncate verbose sections (crawl, news) if needed — preserve scoring rationale, contacts, and buying signals.
-- Every claim must be tagged with its source.
-- Preserve all prior changelog entries when re-running.
-- In batch mode, save incrementally after each company.
-- If slug collision, append a number.
+- Report file must be under 1,000,000 characters.
+- Every claim tagged with its source: `(VERIFIED-SF)`, `(VERIFIED-WEB)`, `(VERIFIED-GONG)`, `(GENERATED)`.
+- Preserve all prior changelog entries on re-runs.
+- In batch mode, save incrementally after each company completes.
+- Slug collision: append `_2`, `_3`, etc.
+- **Primary sources of truth** (in order): Gong transcripts > web search (job postings, GitHub, blog) > Leadfeeder (LF_WEBSITE_VISITS) > SF first-party CRM (SF_CONTACTS, SF_OPPS).
+- All SF 3rd-party enrichment fields (HG_*, CF_*, DATAFOX_*, hiring counts, NUMBER_OF_EMPLOYEES, ANNUAL_REVENUE, APOLLO_INTENT_*) have been removed from queries — get this from web search instead.
+- `SF_OPPS.AIRFLOW_EXPERIENCE` and `CURRENT_AIRFLOW_DEPLOYMENT_MODEL` (human-entered discovery notes) are reliable — lead with them when present.
+- SF_CONTACTS pricing page and Airflow debug page visits are person-level buying signals — flag any that occurred in last 30 days as HIGH urgency.
+- SF_CONTACTS pricing page and Airflow debug page visits are person-level buying signals — flag any that occurred in last 30 days as HIGH urgency.
 
 ---
 
