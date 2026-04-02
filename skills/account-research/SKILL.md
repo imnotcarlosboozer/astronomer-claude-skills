@@ -110,7 +110,23 @@ LIMIT 15
 ```
 If `SF_ACCOUNT_FOUND=false`: skip, record "No opportunity history."
 
-**Query E — Gong calls + transcripts:**
+**Query E — Gong call enrichments (pre-computed Cortex signals, preferred):**
+```sql
+SELECT
+  e.CALL_ID, e.ACCT_NAME, e.CALL_DATE,
+  e.SENTIMENT_SCORE, e.DEAL_RISK,
+  e.TECH_STACK, e.PAIN_POINTS, e.COMPETITORS, e.AIRFLOW_TOPICS,
+  c.CALL_TITLE, c.CALL_URL, c.CALL_BRIEF, c.CALL_NEXT_STEPS,
+  c.PRIMARY_EMPLOYEE, c.CALL_DURATION
+FROM {GONG_ENRICHMENTS_VIEW} e
+JOIN HQ.MODEL_CRM_SENSITIVE.GONG_CALLS c ON c.CALL_ID = e.CALL_ID AND c.IS_DELETED = FALSE
+WHERE e.ACCT_ID = '{SF_ACCT_ID}'
+ORDER BY e.CALL_DATE DESC
+LIMIT 20
+```
+Set `ENRICHMENTS_FOUND = true` if any rows returned. Configure `{GONG_ENRICHMENTS_VIEW}` in setup — this table is populated nightly by a Cortex enrichment job (see setup docs). Falls back to raw transcripts if not configured or empty.
+
+**Query E-fallback — Raw Gong transcripts (only if ENRICHMENTS_FOUND=false):**
 ```sql
 SELECT
   t.CALL_ID, t.CALL_TITLE, t.CALL_URL, t.SCHEDULED_TS,
@@ -257,7 +273,15 @@ Last MQL: {LAST_MQL_DATE} | Cosmos doc: {LAST_COSMOS_DOC_VIEW_DATE} | DAG factor
 [Airflow experience: {AIRFLOW_EXPERIENCE} | Deployment model: {CURRENT_AIRFLOW_DEPLOYMENT_MODEL} | Versions: {CURRENT_AIRFLOW_VERSIONS} | Env count: {CURRENT_AIRFLOW_ENVIRONMENTS_COUNT}]
 [Cloud provider: {CLOUD_PROVIDER}]
 
-=== SNOWFLAKE: GONG_CALL_TRANSCRIPTS ===
+=== SNOWFLAKE: GONG_CALL_ENRICHMENTS (pre-computed Cortex signals) ===
+[Found N enriched calls / No enrichments — falling back to raw transcripts]
+[Consolidated tech stack across all calls: {deduplicated list}]
+[Consolidated pain points: {deduplicated list}]
+[Competitors mentioned: {deduplicated list}]
+[Airflow topics: {deduplicated list}]
+[Per call: Date | Sentiment: {score} | Deal risk: {low/medium/high} | Brief | Next steps | URL]
+
+=== SNOWFLAKE: GONG_CALL_TRANSCRIPTS (raw fallback — only if no enrichments) ===
 [Found N calls / No prior calls — cold outreach]
 [For each call: Date | Participants | Brief | Next steps | Full transcript]
 ```
@@ -446,6 +470,7 @@ For failed companies, write `failed_rerun.csv` and display remediation block.
 | **SF_ACCOUNTS not found** | RESEARCH_DEPTH=FULL by default; skip Queries B–D; note "New prospect — not yet in Salesforce" |
 | **LF_WEBSITE_VISITS empty** | Note "No Leadfeeder visits recorded" — do not attempt Leadfeeder MCP |
 | **SF_OPPS empty** | Note "No opportunity history" — cold outreach confirmed |
+| **Gong enrichments (no rows)** | Fall back to Query E-fallback (raw transcripts); note "Enrichments not available — using raw transcripts" |
 | **Gong (no calls)** | Note "No prior calls — cold outreach" |
 | **Web search (no results)** | Note per section; reduce confidence |
 | **Apollo** | Skip write-back; report saves locally |
